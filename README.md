@@ -1,6 +1,6 @@
 # Bilingual AI Teleprompter
 
-A free, open source voice-activated teleprompter for **macOS** (Windows v3 coming soon).
+A free, open source voice-activated teleprompter for **macOS**.
 
 **Speak → it scrolls. Stop → it pauses. No subscriptions. No cloud. No accounts.**
 
@@ -19,6 +19,22 @@ See [NOTICE](NOTICE) for license and provenance details. Upstream repository: ht
 
 ---
 
+## Screenshots
+
+<p align="center"><img src="docs/screenshots/pill-idle.png" width="380" alt="The idle Dynamic Island pill with hover controls"></p>
+<p align="center"><em>The notch pill — hover reveals the editor chevron and the quit control.</em></p>
+
+<p align="center"><img src="docs/screenshots/word-tracking.png" width="600" alt="Word-level speech tracking on a mixed Chinese/English script"></p>
+<p align="center"><em>Word tracking on a mixed 中文/English script: spoken text dims, the current word is underlined, cue markers pause for you.</em></p>
+
+<p align="center"><img src="docs/screenshots/editor.png" width="600" alt="The script editor with library, rich text toolbar, and cue markers"></p>
+<p align="center"><em>The script editor: library, rich text, cue markers — and ✦ Prepare.</em></p>
+
+<p align="center"><img src="docs/screenshots/ai-review.png" width="600" alt="Prepare with AI side-by-side review"></p>
+<p align="center"><em>Prepare with AI: side-by-side review before anything replaces your script.</em></p>
+
+---
+
 ## Download — v1.0.0 (this fork)
 
 | Platform | Link | Notes |
@@ -27,31 +43,6 @@ See [NOTICE](NOTICE) for license and provenance details. Upstream repository: ht
 | 🍎 Intel Mac | [Download .dmg](https://github.com/JackyJiang08/bilingual-ai-teleprompter/releases/latest) | macOS 13+ |
 
 This fork is **macOS only** (the speech-tracking sidecar uses Apple's Speech framework). For Windows, see the upstream [openTeleprompt releases](https://github.com/ArunNGun/openTeleprompt/releases).
-
----
-
-## What's New in v3.0
-
-### Dynamic Island — properly done
-The notch overlay now has real concave corners that bite into the menubar bezel exactly like Apple's Dynamic Island. Apple spring physics (`cubic-bezier(0.32, 0.72, 0, 1)`) for all expand/collapse animations. Looks like part of the OS.
-
-### Full React frontend
-Entire UI rebuilt in React + Vite with Zustand state management. Faster, cleaner, easier to extend.
-
-### Rich text editor
-Bold, color highlights, and smart cue markers: `[PAUSE]` `[SLOW]` `[BREATHE]`. Format your script exactly how you want to deliver it.
-
-### Script library
-Save multiple scripts, switch instantly. Auto-saves on start. Local only — no cloud, no account.
-
-### Light & dark theme
-Pastel light mode default. Toggle from settings or the menubar. Persists across sessions.
-
-### Live controls while reading
-Adjust scroll speed and font size on the fly — no need to pause your delivery.
-
-### Redesigned settings panel
-Clean React settings view with auto-height. All preferences in one place, persisted across sessions.
 
 ---
 
@@ -101,49 +92,29 @@ The feature is fully optional and off by default: with no provider configured th
 
 ---
 
-## Version History
+## Versioning & upstream history (openTeleprompt)
 
-### v3.0.0 — Dynamic Island Redesign *(latest)*
-- Full React + Vite frontend rewrite
-- Dynamic Island with real concave corners + spring physics
-- Rich text editor (Tiptap), script library, light/dark theme
-- Live speed + font control while reading
-- Playwright visual test suite (16 tests, 48 state combos)
-- macOS only — Windows v3 in progress
-
-### v2.2.1 — Windows Polish
-- Platform-aware tray hint images (Mac + Windows)
-- Author GitHub link in settings
-
-### v2.2.0 — Windows Support
-- Full Windows support (Classic + Top Bar modes)
-- Native Windows settings panel (Fluent-style)
-- GitHub Actions CI — auto-builds Mac + Windows on tag push
-
-### v2.0.0 — Tauri/Rust Rewrite
-
-| | v1.x (Electron) | v2.x+ (Tauri) |
-|---|---|---|
-| Binary size | ~150 MB | **4.6 MB** |
-| DMG size | ~80 MB | **2.6 MB** |
-| RAM usage | ~200 MB | **~40 MB** |
+This fork is versioned from **v1.0.0**; see [CHANGELOG.md](CHANGELOG.md) for what is inherited vs. new. The base is upstream **openTeleprompt v3.0.0** (Dynamic Island redesign, React/Tauri architecture); earlier upstream releases (v2.x Tauri rewrite and Windows support, v1.x Electron) are documented in the [upstream repository](https://github.com/ArunNGun/openTeleprompt), whose full commit history is preserved here.
 
 ---
 
 ## Project Structure
 
 ```
-openTeleprompt/
+bilingual-ai-teleprompter/
 ├── src-tauri/          ← Rust backend
 │   ├── src/lib.rs      ← All Tauri commands
+│   ├── sidecar/        ← Swift speech-recognition sidecar
 │   └── tauri.conf.json
-├── frontend/           ← React + Vite frontend
-│   └── src/            ← App.jsx, views, Zustand store
-├── index.html          ← Vite entry point
+├── src/                ← React + Vite frontend
+│   ├── views/          ← Idle / Edit / Read / Settings views
+│   ├── lib/            ← tokenizer, matcher, speech, AI modules (+ tests)
+│   └── store/          ← Zustand store
+├── index.html          ← Vite entry point (prompter)
 ├── settings.html       ← Settings panel entry
-├── .github/workflows/  ← CI — auto-builds macOS on release tag
-├── electron/           ← Legacy Electron v1.x (archived)
-└── docs/               ← GitHub Pages landing page
+├── scripts/            ← sidecar build + visual snapshot tool
+├── .github/workflows/  ← CI — builds macOS DMGs on release tag
+└── docs/               ← ARCHITECTURE.md + README screenshots
 ```
 
 ---
@@ -157,11 +128,8 @@ npm install
 # Dev mode (hot reload)
 npm run dev
 
-# Production build — macOS
+# Production build (macOS)
 npm run build
-
-# Production build — Windows
-npm run build:win
 ```
 
 **Requirements:** Rust + Cargo, Node.js 18+, Swift toolchain (Xcode Command Line Tools) for the speech sidecar — built automatically by `npm run build:sidecar` (invoked from `beforeDevCommand`/`beforeBuildCommand`). Unit tests for the tokenizer/matcher: `npm test`.
