@@ -5,7 +5,9 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-TRIPLE="${1:-}"
+# Triple resolution: explicit arg > Tauri build-hook env (set when tauri
+# build runs with --target, e.g. CI cross-builds) > host architecture.
+TRIPLE="${1:-${TAURI_ENV_TARGET_TRIPLE:-}}"
 if [ -z "$TRIPLE" ]; then
   case "$(uname -m)" in
     arm64)  TRIPLE="aarch64-apple-darwin" ;;

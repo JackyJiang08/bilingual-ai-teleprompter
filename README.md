@@ -19,15 +19,14 @@ See [NOTICE](NOTICE) for license and provenance details. Upstream repository: ht
 
 ---
 
-## Download — v3.0.0
+## Download — v1.0.0 (this fork)
 
 | Platform | Link | Notes |
 |---|---|---|
-| 🍎 Apple Silicon (M1–M4) | [Download .dmg](https://github.com/ArunNGun/openTeleprompt/releases/latest) | macOS 13+ |
-| 🍎 Intel Mac | [Download .dmg](https://github.com/ArunNGun/openTeleprompt/releases/latest) | macOS 13+ |
-| 🪟 Windows (x64) | [v2.2.1 stable](https://github.com/ArunNGun/openTeleprompt/releases/tag/v2.2.1) | v3 coming soon |
+| 🍎 Apple Silicon (M1–M4) | [Download .dmg](https://github.com/JackyJiang08/bilingual-ai-teleprompter/releases/latest) | macOS 13+ |
+| 🍎 Intel Mac | [Download .dmg](https://github.com/JackyJiang08/bilingual-ai-teleprompter/releases/latest) | macOS 13+ |
 
-**Landing page:** https://arunngun.github.io/openTeleprompt/
+This fork is **macOS only** (the speech-tracking sidecar uses Apple's Speech framework). For Windows, see the upstream [openTeleprompt releases](https://github.com/ArunNGun/openTeleprompt/releases).
 
 ---
 
@@ -171,17 +170,19 @@ npm run build:win
 
 ## First Launch
 
-### macOS
-Right-click the app → **Open** → click **Open** in the security dialog.
+Releases are **not code-signed or notarized** (no Apple Developer certificate), so macOS Gatekeeper will block the app. Two known hurdles, both one-time:
 
-If you see "App is damaged":
+**1. "App is damaged and can't be opened."** It isn't damaged — this is what Gatekeeper says about unsigned apps downloaded from the internet. Strip the quarantine flag:
+
 ```bash
-xattr -cr /Applications/OpenTeleprompter.app
+xattr -cr "/Applications/Bilingual AI Teleprompter.app"
 ```
-This strips the macOS quarantine flag. One-time, you won't need it again.
 
-### Windows (v2.2.1)
-Run the `.exe` installer. If Windows SmartScreen blocks it, click **More info → Run anyway**.
+(Alternatively, right-click the app → **Open** → **Open** works on some macOS versions.)
+
+**2. Permission prompts.** On the first reading session, macOS asks for **Microphone** and **Speech Recognition** access — both power the on-device word tracking; no audio or transcripts leave your Mac. If you decline, the app falls back to volume-based scrolling; re-enable later in System Settings → Privacy & Security. For Mandarin tracking, the Chinese dictation model must be installed (System Settings → Keyboard → Dictation).
+
+If you build from source (`npm run build`), the app is ad-hoc signed and launches without the `xattr` step on the machine that built it.
 
 ---
 

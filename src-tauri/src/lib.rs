@@ -1047,7 +1047,7 @@ pub fn run() {
             TrayIconBuilder::with_id("main-tray")
                 .icon(icon)
                 .icon_as_template(true)
-                .tooltip("OpenTeleprompter")
+                .tooltip("Bilingual AI Teleprompter")
                 .build(app)?;
 
             #[cfg(not(target_os = "macos"))]

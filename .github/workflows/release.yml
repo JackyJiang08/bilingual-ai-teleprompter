@@ -12,79 +12,60 @@ jobs:
   create-release:
     name: Create GitHub Release
     runs-on: ubuntu-latest
-    outputs:
-      upload_url: ${{ steps.create_release.outputs.upload_url }}
     steps:
       - name: Create Release
-        id: create_release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
-          name: ${{ github.ref_name }} — OpenTeleprompter
-          draft: false
+          name: ${{ github.ref_name }} — Bilingual AI Teleprompter
+          draft: true
           prerelease: false
           body: |
-            ## OpenTeleprompter v3.0 — Dynamic Island Redesign
+            ## Bilingual AI Teleprompter v1.0.0
 
-            This is a complete UI overhaul. Everything you loved about v2 is still here — same voice-scroll core, same tiny binary — but the entire interface has been rebuilt from the ground up.
-
-            ---
-
-            ### ✦ What's new in v3
-
-            **Dynamic Island — properly done**
-            The notch overlay now has real concave corners that bite into the menubar bezel exactly like Apple's Dynamic Island. Apple spring physics (`cubic-bezier(0.32, 0.72, 0, 1)`) for all expand/collapse animations. It looks like part of the OS.
-
-            **React frontend**
-            The entire UI is now built in React + Vite with a proper Zustand store. This unlocks fast iteration, clean state management, and a foundation for every feature we want to add next.
-
-            **Rich text editor (Tiptap)**
-            Bold, italic, color highlights, and smart cue markers: `[PAUSE]`, `[SLOW]`, `[BREATHE]`. Format your script exactly how you want to deliver it.
-
-            **Script library**
-            Save multiple scripts, switch between them instantly. Auto-saves on start. No cloud, no account, everything stays local.
-
-            **Light & dark theme**
-            Full theme support with a pastel light mode as default. Toggle from the menubar or settings.
-
-            **Live controls while reading**
-            Adjust scroll speed and font size on the fly — no need to pause your delivery.
-
-            **Redesigned settings panel**
-            A clean React settings view with ResizeObserver-driven auto-height. All your preferences in one place, persisted across sessions.
-
-            **Visual test suite**
-            16 Playwright tests covering 48 state combos (notch/classic × idle/edit/read × dark/light). Confidence in every release.
+            First release of this fork of [openTeleprompt](https://github.com/ArunNGun/openTeleprompt) by [ArunNGun](https://github.com/ArunNGun) (MIT). All the upstream v3.0.0 goodness — the Dynamic Island notch overlay, voice-activated scrolling, rich-text script editor, script library, screen-share invisibility — plus two new headline features.
 
             ---
 
-            ### 📦 This release — macOS only
+            ### 🗣️ Word-level speech tracking (English + 中文)
 
-            > **Windows:** v3 has not been tested on Windows yet. Windows users should continue using [v2.2.1](https://github.com/ArunNGun/openTeleprompt/releases/tag/v2.2.1) which is stable. Windows v3 is coming soon.
+            Instead of scrolling at a fixed speed whenever it hears sound, the prompter now recognizes **what** you say — fully on-device via Apple's Speech framework — and follows your reading position word by word:
+
+            - Spoken text dims, your current word is highlighted, and the scroll is driven by where you actually are in the script.
+            - English and Mandarin, selectable in settings. Chinese is tracked per character (no spaces needed); mixed Chinese-English scripts work.
+            - Tolerates skipped words, fillers, and misreads — the cursor never jumps backward.
+            - 100% on-device: no audio or transcripts ever leave your Mac. Falls back to the classic frequency-based activation if Speech permission is denied or the language model isn't installed.
+
+            ### ✦ Prepare with AI (optional)
+
+            Paste a raw script — email draft, essay, speech, English or Chinese — and one click rewrites it into teleprompter form: short lines for the narrow notch panel, natural spoken phrasing, and `[PAUSE]` / `[SLOW]` / `[BREATHE]` cue markers at the right moments. Chinese lines break at natural prosodic boundaries.
+
+            - Side-by-side review before anything is applied; your original is always kept.
+            - Bring your own Anthropic API key (stored in the macOS Keychain) **or** run fully offline against any OpenAI-compatible local server (e.g. Ollama).
+            - Completely optional and off by default — nothing is ever sent anywhere automatically.
+
+            ---
+
+            ### 📦 Downloads — macOS only
 
             | Platform | File | Notes |
             |---|---|---|
-            | 🍎 Apple Silicon (M1–M4) | `OpenTeleprompter_3.0.0_aarch64.dmg` | macOS 13+ |
-            | 🍎 Intel Mac | `OpenTeleprompter_3.0.0_x64.dmg` | macOS 13+ |
+            | 🍎 Apple Silicon (M1–M4) | `Bilingual AI Teleprompter_1.0.0_aarch64.dmg` | macOS 13+ |
+            | 🍎 Intel Mac | `Bilingual AI Teleprompter_1.0.0_x64.dmg` | macOS 13+ |
 
-            ---
+            ### ⚠️ First launch
 
-            ### ⚠️ First launch on macOS
-
-            macOS will warn the app is "damaged" because it isn't signed with an Apple Developer cert. It's not damaged — just remove the quarantine flag:
+            The app isn't signed with an Apple Developer certificate, so macOS will claim it's "damaged". It isn't — remove the quarantine flag once:
 
             ```bash
-            xattr -cr /Applications/OpenTeleprompter.app
+            xattr -cr "/Applications/Bilingual AI Teleprompter.app"
             ```
 
-            Then double-click normally. You only need to do this once.
+            On first read, macOS will ask for **Microphone** and **Speech Recognition** permissions — both are used entirely on-device.
 
             ---
 
-            ### 🙏 Support
-
-            OpenTeleprompter is free and open source (MIT). If it saves you time, consider leaving a ⭐ on GitHub — it helps more people find it.
-
+            Free and open source (MIT). Based on openTeleprompt by ArunNGun — see [NOTICE](https://github.com/JackyJiang08/bilingual-ai-teleprompter/blob/main/NOTICE) for provenance.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -108,12 +89,12 @@ jobs:
 
       - name: Build
         run: npx @tauri-apps/cli build --target aarch64-apple-darwin
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload DMG
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ github.ref_name }}
+          draft: true
           files: src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -138,17 +119,12 @@ jobs:
 
       - name: Build
         run: npx @tauri-apps/cli build --target x86_64-apple-darwin
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload DMG
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ github.ref_name }}
+          draft: true
           files: src-tauri/target/x86_64-apple-darwin/release/bundle/dmg/*.dmg
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  # Windows build intentionally skipped for v3.0.0
-  # v3 has not been validated on Windows yet.
-  # Windows users: continue using v2.2.1 (stable).
-  # Windows v3 is coming in a follow-up release.
