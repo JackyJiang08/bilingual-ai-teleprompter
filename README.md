@@ -13,7 +13,7 @@ This project is based on [openTeleprompt](https://github.com/ArunNGun/openTelepr
 This fork extends the original project with:
 
 - **Word-level speech tracking (English + Mandarin)** — on-device speech recognition follows your actual reading position: spoken text dims, the current word is highlighted, and the scroll is driven by where you are in the script, broadcast-teleprompter style. Mixed Chinese–English scripts are handled. See [Word Tracking](#word-tracking-this-fork).
-- **AI script preprocessing** — automatic script cleanup, segmentation, and cue-marker insertion before a session (planned; in development)
+- **AI script preparation** — an optional "Prepare for Prompter" action rewrites a raw script (email draft, essay, speech — English or Chinese) into teleprompter-friendly form: short lines, spoken phrasing, and `[PAUSE]`/`[SLOW]`/`[BREATHE]` cue markers. See [Prepare with AI](#prepare-with-ai-this-fork).
 
 See [NOTICE](NOTICE) for license and provenance details. Upstream repository: https://github.com/ArunNGun/openTeleprompt
 
@@ -82,6 +82,23 @@ Instead of scrolling at a fixed speed whenever it hears sound, the prompter can 
 - **Graceful fallback** — if Speech permission is denied or the on-device model for the selected language isn't installed (System Settings › Keyboard › Dictation), the app falls back to the original frequency-based voice activation and says so in Settings. You can also turn Word Tracking off entirely.
 
 Under the hood: a small Swift sidecar streams on-device partial transcripts to the app, and a forward-searching matcher aligns them against the tokenized script. Details in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) §3.1.
+
+---
+
+## Prepare with AI (this fork)
+
+Paste a long raw script — an email draft, an essay, a speech, in English or Chinese — and click **✦ Prepare** in the script editor. The app asks an LLM to rewrite it into teleprompter-friendly form:
+
+- **Short lines** sized for the narrow notch panel, with natural spoken phrasing. Chinese lines break at prosodic boundaries, never mid-phrase.
+- **Cue markers** (`[PAUSE]` / `[SLOW]` / `[BREATHE]`) inserted sparingly at rhetorically appropriate points, using the app's existing marker convention.
+- **You stay in control** — the result appears in a side-by-side review (original vs prepared). Edit the prepared text, then Accept or Reject. Accepting saves your original script to the library first, so it is never silently overwritten.
+
+Two providers, selectable in Settings → Prepare with AI:
+
+- **Claude API** — bring your own Anthropic API key ([console.anthropic.com](https://console.anthropic.com)). The key is stored in the **macOS Keychain**, never in plaintext config files or this repo. Model defaults to `claude-opus-5`.
+- **Local (offline)** — any OpenAI-compatible endpoint, e.g. [Ollama](https://ollama.com) (`ollama serve`, set the model name in settings). Nothing leaves your machine.
+
+The feature is fully optional and off by default: with no provider configured the app behaves exactly as before, and the Prepare button just opens settings with setup instructions. AI calls happen **only** when you click Prepare — never automatically.
 
 ---
 

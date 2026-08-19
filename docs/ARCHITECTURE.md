@@ -33,7 +33,7 @@ The two React windows are separate Vite entry points, declared in `vite.config.j
 
 Direction of traffic:
 
-- **JS → Rust (commands):** the 24 handlers registered in `run()` (`get_config`, `set_config`, `switch_mode`, `get_scripts`, `save_scripts`, `set_ignore_mouse`, `resize_prompter`, `toggle_prompter`, `resize_settings`, `quit_app`, `open_devtools`, `hide_settings`, `start_drag`, `set_movable`, `move_window`, `get_window_pos`, `close_welcome`, `open_url`, `open_settings`, `focus_prompter`, `elevate_notch_window`, `start_speech`, `stop_speech`, `get_speech_status`).
+- **JS → Rust (commands):** the 27 handlers registered in `run()` (`get_config`, `set_config`, `switch_mode`, `get_scripts`, `save_scripts`, `set_ignore_mouse`, `resize_prompter`, `toggle_prompter`, `resize_settings`, `quit_app`, `open_devtools`, `hide_settings`, `start_drag`, `set_movable`, `move_window`, `get_window_pos`, `close_welcome`, `open_url`, `open_settings`, `focus_prompter`, `elevate_notch_window`, `start_speech`, `stop_speech`, `get_speech_status`, `ai_complete`, `set_ai_key`, `has_ai_key`).
 - **Rust → JS (events):** three event names.
   - `config-update` — broadcast by `set_config`; consumed by `App.jsx` (which normalizes snake_case→camelCase) and `SettingsView.jsx`.
   - `shortcut` — emitted to the `prompter` window with a string payload `"pause" | "faster" | "slower" | "reset"` from the global-shortcut handler, and `"stop"` from `switch_mode` and `toggle_prompter`; consumed in `ReadView.jsx`.
@@ -45,7 +45,7 @@ Permissions for the WebView side are scoped in `src-tauri/capabilities/default.j
 
 Three state stores, with the Rust side as source of truth for anything persistent:
 
-1. **Rust `AppState`**: `Mutex<Config>`, `Mutex<Option<(f64,f64)>>` (last classic-mode window position), plus the speech sidecar's `CommandChild` handle and last status value. `Config` holds `scroll_speed`, `threshold`, `screenshare_hidden`, `mode`, `opacity`, `auto_scroll`, `mic_device_id`, `theme`, `speech_lang`, `word_tracking`; serialized camelCase (the two new fields carry `#[serde(default)]`s so pre-existing config files still parse).
+1. **Rust `AppState`**: `Mutex<Config>`, `Mutex<Option<(f64,f64)>>` (last classic-mode window position), plus the speech sidecar's `CommandChild` handle and last status value. `Config` holds `scroll_speed`, `threshold`, `screenshare_hidden`, `mode`, `opacity`, `auto_scroll`, `mic_device_id`, `theme`, `speech_lang`, `word_tracking`, and the non-secret AI settings `ai_provider`/`ai_model`/`ai_local_url`; serialized camelCase (fields added by this fork carry `#[serde(default)]`s so pre-existing config files still parse). The Anthropic API key is **not** in `Config` — it lives in the macOS Keychain (§4.4).
 2. **Disk**: three dotfiles in the user's home directory (`lib.rs:123-139`): `~/.teleprompter-config.json`, `~/.teleprompter-scripts.json`, `~/.teleprompter-launched` (first-launch marker). Writes happen in `save_config` (`lib.rs:147-151`) and `save_scripts_to_disk` (`lib.rs:251-255`).
 3. **Zustand store** (`src/store/index.js`): a single `useAppStore` with `view` (`'idle' | 'edit' | 'read'`), a `config` mirror, `scripts` + `currentScriptIndex`, the active script (`scriptText` plain text, `scriptDoc` Tiptap JSON), playback flags, and `recognition` — the speech-tracking state written by ReadView while reading (`engine: 'none'|'speech'|'vad'`, `status`, `message`, `cursorTokenIndex`, `matchedCount`, `total`, `confidence`).
 
@@ -179,6 +179,24 @@ Whole-array read/write through two commands: `get_scripts` → `load_scripts()` 
 
 ---
 
+### 4.4 Prepare with AI (this fork)
+
+An optional, explicitly user-triggered preprocessing step that rewrites a raw script into teleprompter form (short lines, spoken phrasing, cue markers; Chinese lines broken at prosodic boundaries). Fully inert when unconfigured — the app behaves exactly as upstream.
+
+**Split of responsibilities.** Everything testable lives in JS; secrets and transport live in Rust:
+
+- `src/lib/ai.js` — builds the prompt (`buildPrepareMessages`, with a CJK-detection addendum for Chinese scripts), parses/normalizes the response (`parsePreparedResponse`: fence stripping, marker-case normalization, blank-line collapsing), converts prepared text to a Tiptap doc (`preparedTextToDoc`, one paragraph per line), and maps provider error codes to actionable messages (`mapAiError`). Unit tests with mocked providers: `src/lib/__tests__/ai.test.js`.
+- `ai_complete(system, prompt)` in `src-tauri/src/lib.rs` — a dumb async transport with two implementations behind `config.ai_provider`:
+  - `"anthropic"` — `POST https://api.anthropic.com/v1/messages` via `reqwest`; model from `ai_model` (default `claude-opus-5`); handles the `refusal` stop reason and opts into server-side refusal fallbacks (`fallbacks: "default"`, beta `server-side-fallback-2026-07-01`).
+  - `"local"` — `POST {ai_local_url}/v1/chat/completions` (OpenAI-compatible, e.g. Ollama) for fully offline use; requires an explicit model name.
+  - Errors return as `code:detail` strings (`no_provider`, `no_api_key`, `no_model`, `auth`, `rate_limit` with retry-after, `model_not_found`, `network`, `refusal`, `server`, `parse`).
+
+**Key storage.** The Anthropic API key is stored in the macOS Keychain via the `keyring` crate (service `OpenTeleprompter`, account `anthropic-api-key`). `set_ai_key` writes/deletes, `has_ai_key` reports existence; the key itself is read only inside `ai_complete` at request time and **never crosses IPC to the WebView** and never touches the JSON config files.
+
+**UI flow.** `EditView.jsx` `handlePrepare`: no provider configured → `open_settings` (settings carries setup instructions); otherwise `prepareScript(editor.getText())`. On success the view switches to a side-by-side review — original (read-only) vs prepared (editable textarea) — with Accept/Reject. `acceptReview` first appends the pre-preparation script to the library (`"<name> · original"`, persisted via `save_scripts`) so the original stays recoverable, then replaces the editor content with `preparedTextToDoc(...)`. Reject leaves the editor untouched. Nothing ever runs automatically.
+
+---
+
 ## 5. Settings system and global shortcuts
 
 ### 5.1 Config flow
@@ -190,6 +208,7 @@ Whole-array read/write through two commands: `get_scripts` → `load_scripts()` 
 - Mode switching calls the dedicated `switch_mode` command (not `set_config`) because the prompter window must be destroyed and recreated (`SettingsView.jsx:154-157`, `lib.rs:309-333`).
 - Mic enumeration via `enumerateDevices` after a temporary permission-priming stream (`SettingsView.jsx:105-116`).
 - Word tracking (this fork): a "Word Tracking" toggle (`wordTracking`) and an English/中文 selector (`speechLang: 'en-US' | 'zh-CN'`), plus a live status line driven by `get_speech_status` + `speech-msg` events and an on-device privacy note. A language change takes effect at the start of the next reading session (the sidecar takes its locale at spawn).
+- Prepare with AI (this fork): provider selector (Off / Claude API / Local → `aiProvider`), model and local-URL text fields (`aiModel`, `aiLocalUrl`, committed on blur), and Keychain key management through `set_ai_key`/`has_ai_key` (the key value never reaches the settings window after save). Includes the explicit-action notice required by the feature: scripts are sent only on ✦ Prepare.
 
 ### 5.2 Global shortcuts
 
@@ -246,7 +265,9 @@ This fork implemented the word tracker along the three seams identified here; th
 
 Remaining extension surface here: swapping the recognizer (e.g. a Whisper sidecar for more locales) only requires emitting the same NDJSON protocol from a different binary; nothing above the sidecar changes.
 
-### 7b. Script preprocessing before a script is loaded into the prompter
+### 7b. Script preprocessing before a script is loaded into the prompter — **implemented**
+
+This fork implemented AI script preparation at the editor level ("Prepare with AI", §4.4): the transform runs on the editor's current text on explicit user action, with a review step, rather than silently inside `handleStart`. The analysis below remains valid for further preprocessing hooks (e.g. automatic per-`Go` transforms or token-level annotation).
 
 There is a single choke point where an edited script becomes the active prompter content: **`handleStart` in `src/views/EditView.jsx:77-85`**. It computes `text` and `editor.getJSON()`, then calls `setScriptText` / `setScriptDoc` (`store/index.js:24-27`) and `setView('read')`. An AI preprocessing step (cleanup, sentence segmentation, automatic `[PAUSE]`/`[BREATHE]` insertion, pinyin/translation annotation) slots in as an async transform of the Tiptap JSON between `editor.getJSON()` and `setScriptDoc`, ideally with a loading state on the "Go →" button. Because `ReadView` consumes only `scriptDoc`/`scriptText` from the store (`ReadView.jsx:8-9`), no other component needs to change.
 
