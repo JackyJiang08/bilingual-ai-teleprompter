@@ -63,6 +63,65 @@ fn elevate_to_notch_level(window: &WebviewWindow) {
 #[cfg(not(target_os = "macos"))]
 fn elevate_to_notch_level(_window: &WebviewWindow) {}
 
+// ── Notch metrics (macOS) ──────────────────────────────────
+// Derives the physical notch geometry at runtime from NSScreen instead of
+// hardcoding per-model values: height = safeAreaInsets.top, width/x = the gap
+// between auxiliaryTopLeftArea and auxiliaryTopRightArea (both are ObjC
+// selectors returning a zero rect on non-notch screens — Swift maps that to
+// nil). Values are logical points, so they follow the user's chosen display
+// scaling automatically. centerX is in global top-left window coordinates.
+//
+// Dev-only test hook: TELEPROMPTER_FAKE_NOTCH="<width>x<height>@<centerX>"
+// simulates a notch so the sizing pipeline can be exercised (and captured)
+// on machines without a notch display. Never set in normal operation.
+fn fake_notch_metrics() -> Option<serde_json::Value> {
+    let v = std::env::var("TELEPROMPTER_FAKE_NOTCH").ok()?;
+    let (dims, center) = v.split_once('@')?;
+    let (w, h) = dims.split_once('x')?;
+    Some(serde_json::json!({
+        "hasNotch": true,
+        "width": w.trim().parse::<f64>().ok()?,
+        "height": h.trim().parse::<f64>().ok()?,
+        "centerX": center.trim().parse::<f64>().ok()?,
+    }))
+}
+
+#[cfg(target_os = "macos")]
+fn notch_metrics() -> Option<serde_json::Value> {
+    if let Some(fake) = fake_notch_metrics() { return Some(fake); }
+    use objc2_foundation::NSRect;
+    unsafe {
+        let mtm = objc2::MainThreadMarker::new_unchecked();
+        let screens = objc2_app_kit::NSScreen::screens(mtm);
+        for s in screens.iter() {
+            let inset_top = s.safeAreaInsets().top;
+            if inset_top <= 0.0 { continue; }
+            let sf = s.frame();
+            let aux_l: NSRect = objc2::msg_send![&*s, auxiliaryTopLeftArea];
+            let aux_r: NSRect = objc2::msg_send![&*s, auxiliaryTopRightArea];
+            if aux_l.size.width <= 0.0 || aux_r.size.width <= 0.0 { continue; }
+            // Notch span = gap between the two auxiliary areas, relative to
+            // this screen's left edge (aux rects are in global coordinates).
+            let left_rel  = (aux_l.origin.x + aux_l.size.width) - sf.origin.x;
+            let right_rel = aux_r.origin.x - sf.origin.x;
+            let width = right_rel - left_rel;
+            if width <= 0.0 { continue; }
+            return Some(serde_json::json!({
+                "hasNotch": true,
+                "width": width,
+                "height": inset_top,
+                "centerX": sf.origin.x + left_rel + width / 2.0,
+            }));
+        }
+    }
+    None
+}
+
+#[cfg(not(target_os = "macos"))]
+fn notch_metrics() -> Option<serde_json::Value> {
+    fake_notch_metrics()
+}
+
 
 
 
@@ -310,6 +369,11 @@ fn get_config(state: State<AppState>) -> Config {
 }
 
 #[tauri::command]
+fn get_notch_metrics() -> serde_json::Value {
+    notch_metrics().unwrap_or_else(|| serde_json::json!({ "hasNotch": false }))
+}
+
+#[tauri::command]
 fn set_config(app: AppHandle, state: State<AppState>, patch: serde_json::Value) {
     let mut cfg = state.config.lock().unwrap();
     if let Some(v) = patch.get("scrollSpeed").and_then(|v| v.as_f64()) { cfg.scroll_speed = v; }
@@ -401,11 +465,18 @@ fn resize_prompter(app: AppHandle, state: State<AppState>, dims: serde_json::Val
         let scale = monitor.as_ref().map(|m| m.scale_factor()).unwrap_or(1.0);
         let screen_w = monitor.as_ref().map(|m| m.size().width as f64 / scale).unwrap_or(1440.0);
 
-        // Always use exact island size — center the window horizontally
-        // Island is centered via CSS within this window, so no full-screen-width needed
-        let win_w = width.max(200.0);
-        let win_h = height.max(36.0);
-        let x = (screen_w - win_w) / 2.0;
+        // Always use exact island size — center the window horizontally.
+        // Island is centered via CSS within this window, so the window must be
+        // centered on the physical notch (runtime-derived); screens without a
+        // notch center on the screen midline as before.
+        // Loose sanity floor only — the idle size is notch-derived and can be
+        // well under the old 200×36 fixed pill on scaled resolutions.
+        let win_w = width.max(120.0);
+        let win_h = height.max(24.0);
+        let center_x = notch_metrics()
+            .and_then(|m| m.get("centerX").and_then(|v| v.as_f64()))
+            .unwrap_or(screen_w / 2.0);
+        let x = center_x - win_w / 2.0;
         w.set_size(LogicalSize::new(win_w, win_h)).map_err(|e| e.to_string())?;
         w.set_position(LogicalPosition::new(x, 0.0)).map_err(|e| e.to_string())?;
         return Ok(());
@@ -934,7 +1005,7 @@ pub fn run() {
         .plugin(tauri_plugin_positioner::init())
         .manage(state)
         .invoke_handler(tauri::generate_handler![
-            get_config, set_config, switch_mode,
+            get_config, set_config, switch_mode, get_notch_metrics,
             get_scripts, save_scripts,
             set_ignore_mouse, resize_prompter,
             toggle_prompter, resize_settings,

@@ -7,6 +7,7 @@ export const API = {
   elevateNotchWindow: () => invoke('elevate_notch_window'),
   platform: navigator.platform.toLowerCase().includes('win') ? 'win32' : 'darwin',
   getConfig: () => tauriInvoke('get_config'),
+  getNotchMetrics: () => tauriInvoke('get_notch_metrics'),
   setConfig: (patch) => tauriInvoke('set_config', { patch }),
   onConfigUpdate: (cb) => tauriListen('config-update', (e) => cb(e.payload)),
   getScripts: () => tauriInvoke('get_scripts'),

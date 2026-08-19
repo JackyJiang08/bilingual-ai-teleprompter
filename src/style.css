@@ -60,9 +60,11 @@ body.mode-classic, body.mode-classic #root {
 
 /* ── Island — Apple Dynamic Island for macOS notch ──────────
    Window: full-screen-width transparent, y=0 (screen top, level=27).
-   Notch on Mac14,2 (MBA M2 13"): 209×38px logical, centered at x=751.
-   Island idle state exactly matches the physical notch — seamless.
-   Expands downward like Apple Dynamic Island on iPhone 14+.
+   Idle island geometry = the physical notch, measured at runtime from
+   NSScreen (get_notch_metrics) and injected as --notch-w/--notch-h by
+   App.jsx, so it is exact on any model and any display scaling. The
+   200×35 fallback applies in the browser harness and on non-notch
+   displays. Expands downward like Apple Dynamic Island on iPhone 14+.
 ─────────────────────────────────────────────── */
 #island {
   position: fixed;
@@ -70,9 +72,9 @@ body.mode-classic, body.mode-classic #root {
   left: 50%;
   transform: translateX(-50%);
 
-  /* Idle: notch dimensions + 4px bleed (matches boring.notch: width - leftPad - rightPad + 4) */
-  width: 200px;
-  height: 35px;
+  /* Idle: exactly the physical notch (runtime metrics; see above) */
+  width: var(--notch-w, 200px);
+  height: var(--notch-h, 35px);
 
   /* Flat top (flush with bezel), rounded bottom corners */
   border-radius: 0 0 22px 22px;
@@ -102,8 +104,8 @@ body.mode-classic, body.mode-classic #root {
 
 /* Hover: subtle grow to hint interactivity */
 #island:not(.state-edit):not(.state-read):hover {
-  width: 200px;
-  height: 35px;
+  width: var(--notch-w, 200px);
+  height: var(--notch-h, 35px);
   border-radius: 0 0 24px 24px;
   box-shadow:
     inset 0 -1px 0 var(--inset-glow),

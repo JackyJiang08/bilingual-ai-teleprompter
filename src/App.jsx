@@ -5,14 +5,24 @@ import IdleView from './views/IdleView'
 import EditView from './views/EditView'
 import ReadView from './views/ReadView'
 
-// Island sizes — 20px side + bottom bleed so box-shadow renders fully
+// Island sizes — 20px side + bottom bleed so box-shadow renders fully.
+// The idle pill matches the physical notch (runtime metrics from NSScreen via
+// get_notch_metrics); the fallback 200×35 keeps browser tests and non-notch
+// displays on the previous fixed geometry. Window = island + slack so the
+// CSS-centered island never clips.
 const SB = 20
 const BB = 20
-const ISLAND_SIZES = {
-  idle:      { w: 213,          h: 38       },
-  idleHover: { w: 236,          h: 48       },
-  edit:      { w: 560 + SB * 2, h: 340 + BB },
-  read:      { w: 440 + SB * 2, h: 205 + BB },
+export function islandSizes(notch) {
+  const nw = notch?.width ?? 200
+  const nh = notch?.height ?? 35
+  return {
+    // 14pt slack (even, so window x = centerX − w/2 stays integral and the
+    // CSS-centered island lands exactly on the notch — no half-point shift)
+    idle:      { w: nw + 14,      h: nh + 3   },
+    idleHover: { w: nw + 36,      h: nh + 13  },
+    edit:      { w: 560 + SB * 2, h: 340 + BB },
+    read:      { w: 440 + SB * 2, h: 205 + BB },
+  }
 }
 // Classic: window = island size exactly, OS handles shadow
 const CLASSIC_SIZES = {
@@ -40,6 +50,8 @@ export default function App() {
   // dev-only TELEPROMPTER_DEMO_PARAMS env var (screenshot captures in Tauri).
   const [isHovered, setIsHovered] = useState(() =>
     new URLSearchParams(window.location.search).has('hoverdemo'))
+  // Physical notch geometry (null = no notch / browser: fixed fallback sizes)
+  const [notch, setNotch] = useState(null)
   const isClassic = config.mode === 'classic'
 
   // ── Bootstrap ──────────────────────────────────────────────
@@ -63,6 +75,15 @@ export default function App() {
         aiLocalUrl:   cfg.aiLocalUrl   ?? cfg.ai_local_url  ?? 'http://localhost:11434',
       })
       API.setIgnoreMouse(false)
+    })
+
+    // Physical notch metrics — the collapsed pill matches the notch exactly
+    // (width, height, x-position); CSS reads the same values via vars.
+    API.getNotchMetrics().then((m) => {
+      if (!m?.hasNotch) return
+      setNotch(m)
+      document.documentElement.style.setProperty('--notch-w', `${m.width}px`)
+      document.documentElement.style.setProperty('--notch-h', `${m.height}px`)
     })
 
     // Load scripts — skipped when a URL demo param drives the view, so
@@ -148,13 +169,13 @@ export default function App() {
 
   // ── Window resize ──────────────────────────────────────────
   useEffect(() => {
-    const sizes = isClassic ? CLASSIC_SIZES : ISLAND_SIZES
+    const sizes = isClassic ? CLASSIC_SIZES : islandSizes(notch)
     const size  = view === 'edit' ? sizes.edit
                 : view === 'read' ? sizes.read
                 : isHovered       ? sizes.idleHover
                 : sizes.idle
     API.resizePrompter({ width: size.w, height: size.h })
-  }, [view, isHovered, config.mode])
+  }, [view, isHovered, config.mode, notch])
 
   // ── Event handlers ─────────────────────────────────────────
   function handleMouseEnter() {
