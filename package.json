@@ -10,13 +10,16 @@
     "build": "tauri build",
     "build:frontend": "vite build",
     "build:win": "tauri build --target x86_64-pc-windows-msvc",
+    "build:sidecar": "bash scripts/build-sidecar.sh",
     "snap:save": "node scripts/snap.mjs save",
-    "snap:check": "node scripts/snap.mjs check"
+    "snap:check": "node scripts/snap.mjs check",
+    "test": "vitest run"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",
     "@vitejs/plugin-react": "^6.0.1",
-    "vite": "^8.0.7"
+    "vite": "^8.0.7",
+    "vitest": "^4.1.11"
   },
   "dependencies": {
     "@tiptap/extension-color": "^3.22.3",
