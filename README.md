@@ -66,7 +66,7 @@ Clean React settings view with auto-height. All preferences in one place, persis
 - 🌗 **Light & dark theme** — pastel light default, toggleable
 - ⚡ **Live controls** — speed + font size adjustable while reading
 - 🌫️ **Opacity control** — barely-there to solid
-- ⌨️ **Global shortcuts** — ⌘⇧Space, ⌘⇧↑↓, ⌘⇧R
+- ⌨️ **Global shortcuts** — ⌘⇧Space, ⌘⇧↑↓, ⌘⇧R, ⌘⇧E (open editor)
 
 ---
 

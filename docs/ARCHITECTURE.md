@@ -2,7 +2,7 @@
 
 Technical architecture of this codebase (upstream: [openTeleprompt](https://github.com/ArunNGun/openTeleprompt) v3.0.0, extended in this fork with on-device word-level speech tracking — §3.1). A Tauri v2 desktop app: Rust backend, React 19 + Vite frontend, Zustand state, Tiptap rich-text editing, plus a Swift speech-recognition sidecar. `file:line` references date from the fork-point audit; in files this fork has since modified (`lib.rs`, `ReadView.jsx`, `tokenizer.js`, settings) they may be offset — treat them as anchors, not exact coordinates.
 
-> **Scope note.** `frontend/renderer/` is the legacy Electron v1.x renderer (plain JS, `frontend/renderer/app.js`). It is still referenced by the Rust backend for the Windows settings panel and the first-launch welcome window (see §1.4), but the active macOS app is the React frontend in `src/`. `docs/` (other than this file) is the GitHub Pages landing site.
+> **Scope note.** `frontend/renderer/` is the legacy Electron v1.x renderer (plain JS, `frontend/renderer/app.js`). On macOS nothing references it anymore (this fork removed the last consumer — see §1.4); only the compiled-out Windows settings path still points at it. `docs/` (other than this file) is the GitHub Pages landing site.
 
 ---
 
@@ -16,7 +16,7 @@ There is one Rust process and up to three WebView windows, each identified by a 
 |---|---|---|
 | `prompter` | React app (`index.html` → `src/main.jsx` → `src/App.jsx`) — the notch island / classic pill | `setup()` at `src-tauri/src/lib.rs:693-708`, and recreated by `create_prompter_window()` at `lib.rs:511-578` on mode switch |
 | `settings` | React settings panel (`settings.html` → `src/settings-main.jsx` → `src/views/SettingsView.jsx`) | lazily by `show_settings()` at `lib.rs:601-631` on tray click |
-| `welcome` | Legacy static page `frontend/renderer/welcome.html` | first launch only, `lib.rs:722-761` |
+On a normal launch exactly two things appear: the notch pill (the `prompter` window in its idle state) and the tray icon. Upstream also opened a first-launch `welcome` window (borderless, centered, always-on-top) pointing at `renderer/welcome.html` — a file absent from the bundled frontend, which produced an unclosable blank/black window; this fork removed it along with the `close_welcome` command and the `~/.teleprompter-launched` marker logic. The editor is not a separate window: it is the `edit` view *inside* the prompter island, opened only by explicit action — clicking the pill, or the ⌘⇧E global shortcut (§5.2).
 
 In addition to the windows there is one supervised child process: **`speech-sidecar`**, a Swift binary (source `src-tauri/sidecar/speech-sidecar.swift`, bundled via `externalBin` in `tauri.conf.json`) that runs Apple's `SFSpeechRecognizer` fully on-device and streams partial transcripts to the app — see §3.1.
 
@@ -33,7 +33,7 @@ The two React windows are separate Vite entry points, declared in `vite.config.j
 
 Direction of traffic:
 
-- **JS → Rust (commands):** the 27 handlers registered in `run()` (`get_config`, `set_config`, `switch_mode`, `get_scripts`, `save_scripts`, `set_ignore_mouse`, `resize_prompter`, `toggle_prompter`, `resize_settings`, `quit_app`, `open_devtools`, `hide_settings`, `start_drag`, `set_movable`, `move_window`, `get_window_pos`, `close_welcome`, `open_url`, `open_settings`, `focus_prompter`, `elevate_notch_window`, `start_speech`, `stop_speech`, `get_speech_status`, `ai_complete`, `set_ai_key`, `has_ai_key`).
+- **JS → Rust (commands):** the 26 handlers registered in `run()` (`get_config`, `set_config`, `switch_mode`, `get_scripts`, `save_scripts`, `set_ignore_mouse`, `resize_prompter`, `toggle_prompter`, `resize_settings`, `quit_app`, `open_devtools`, `hide_settings`, `start_drag`, `set_movable`, `move_window`, `get_window_pos`, `open_url`, `open_settings`, `focus_prompter`, `elevate_notch_window`, `start_speech`, `stop_speech`, `get_speech_status`, `ai_complete`, `set_ai_key`, `has_ai_key`).
 - **Rust → JS (events):** three event names.
   - `config-update` — broadcast by `set_config`; consumed by `App.jsx` (which normalizes snake_case→camelCase) and `SettingsView.jsx`.
   - `shortcut` — emitted to the `prompter` window with a string payload `"pause" | "faster" | "slower" | "reset"` from the global-shortcut handler, and `"stop"` from `switch_mode` and `toggle_prompter`; consumed in `ReadView.jsx`.
@@ -55,7 +55,7 @@ Three state stores, with the Rust side as source of truth for anything persisten
 
 Documented here because they affect where new code can safely go; none were changed in this fork:
 
-- `setup()` builds the initial prompter window with release URL `renderer/index.html` (`lib.rs:691`), while `create_prompter_window()` uses `index.html` (`lib.rs:541`). The Vite build (`frontendDist: "../dist"`, `tauri.conf.json:10`) emits only `index.html` and `settings.html`; nothing copies `frontend/renderer/` into `dist/`, so the `renderer/*` App URLs (initial prompter, `welcome`, Windows settings at `lib.rs:603`) point at paths absent from the bundled frontend.
+- **(Fixed in this fork.)** Upstream pointed several release URLs at `renderer/*` paths absent from the bundled frontend (the Vite build emits only `index.html` and `settings.html`): the initial prompter (which loaded only via the asset protocol's SPA fallback — now `index.html` directly) and the first-launch `welcome` window (which rendered an unclosable blank window — now removed, see §1.1). Only the compiled-out Windows settings path still references `renderer/`.
 - `src/lib/api.js:5` — `elevateNotchWindow` calls a bare `invoke` (undefined identifier; would throw if invoked). Nothing calls it: notch elevation actually happens Rust-side (§2.2). The `elevate_notch_window` command (`lib.rs:267-279`) is effectively unreachable from JS as wired.
 - `src-tauri/Cargo.toml:23-33`: `serde`, `serde_json`, `dirs`, `open` and all four Tauri plugins are declared under `[target.'cfg(target_os = "macos")'.dependencies]`, so the crate as committed only builds on macOS (consistent with the README's "Windows v3 coming soon").
 
@@ -83,7 +83,7 @@ In notch mode the window is created **full screen width × 200 px at (0, 0)** (`
 2. `setLevel(27)` — `NSMainMenuWindowLevel` (24) + 3, so the window floats **above the menu bar** (`lib.rs:25`).
 3. `setCollectionBehavior((1<<0)|(1<<4)|(1<<6)|(1<<8))` — `canJoinAllSpaces | stationary | ignoresCycle | fullScreenAuxiliary` (`lib.rs:27-29`).
 4. `setHasShadow(false)` (`lib.rs:30`).
-5. `setFrame_display` repositions the window flush with the physical screen top using `NSScreen::mainScreen` bottom-left coordinates (`lib.rs:37-47`). The window is 200 px tall = ~160 px notch content + 40 px overlap kept on-screen because WKWebView stops rendering when fully above the visible area (comment at `lib.rs:7-12`).
+5. `setFrame_display` repositions the window flush with the physical screen top. **Display selection (this fork):** the target screen is the one with a physical notch — the first `NSScreen` whose `safeAreaInsets.top > 0` — falling back to `mainScreen` when no notch display exists (clamshell mode, external-only setups). Upstream used `mainScreen` (the screen with keyboard focus) unconditionally, which parked the pill on an external monitor whenever focus was there; requires macOS 12+ API, and `minimumSystemVersion` is now 13.0. The window is 200 px tall = ~160 px notch content + 40 px overlap kept on-screen because WKWebView stops rendering when fully above the visible area (comment at `lib.rs:7-12`).
 
 Called from `setup()` (`lib.rs:713-715`) and from `create_prompter_window()` (`lib.rs:572-575`); `switch_mode` dispatches recreation via `run_on_main_thread` because NSWindow APIs must run on the main thread (`lib.rs:327-331`).
 
@@ -96,6 +96,7 @@ Called from `setup()` (`lib.rs:713-715`) and from `create_prompter_window()` (`l
 - **Resize protocol:** the frontend owns geometry. `App.jsx:11-23` defines per-view sizes (`ISLAND_SIZES` / `CLASSIC_SIZES`); the effect at `App.jsx:87-94` calls `API.resizePrompter` on every view/hover/mode change. Rust's `resize_prompter` (`lib.rs:355-392`) in notch mode sizes the window to exactly the island and horizontally centers it at y = 0 (so the small idle pill doesn't intercept clicks across the whole screen top); in classic mode it resizes in place.
 - **Click-through:** `set_ignore_mouse` → `set_ignore_cursor_events` (`lib.rs:342-352`), force-disabled in classic mode. Never set at creation time — a code comment (`lib.rs:565-566`) notes doing so breaks WKWebView rendering; `App.jsx:45` re-enables mouse after mount.
 - **Classic dragging:** mousedown on non-interactive elements calls `API.startDrag()` → `start_dragging()` (`App.jsx:102-107`, `lib.rs:480-485`); position persisted in `AppState.classic_pos` via `move_window` (`lib.rs:458-467`).
+- **Closing vs quitting (this fork):** the editor's header ✕ collapses the island back to the idle pill (the prompter window itself never closes); the app quits only through explicit quit controls — a hover-revealed quit icon on the idle pill (always visible in classic mode), a ⏻ button in the editor header, or the tray settings panel's Quit — all invoking `quit_app`, whose `RunEvent::Exit` handler kills the speech sidecar so no child process outlives the app.
 - **Settings window placement:** anchored to the tray icon via `tauri-plugin-positioner` `Position::TrayCenter`, gated by the `TRAY_CLICKED` atomic because the positioner panics before it has seen a tray event (`lib.rs:63`, `lib.rs:591-598`); falls back to bottom-right. Settings hides instead of closing (`CloseRequested` handler, `lib.rs:847-855`) and auto-hides on blur (`SettingsView.jsx:73-76`).
 
 ---
@@ -212,7 +213,7 @@ An optional, explicitly user-triggered preprocessing step that rewrites a raw sc
 
 ### 5.2 Global shortcuts
 
-Registered in `setup()` using `tauri-plugin-global-shortcut` (`lib.rs:809-843`). On macOS both `⌘⇧` (SUPER) and `⌃⇧` (CONTROL) variants are registered for `Space`, `ArrowUp`, `ArrowDown`, `KeyR`; Windows builds register only `Ctrl+Shift` variants. Registration failures are silently skipped (`let _ =`, `lib.rs:832`) so OS-taken combos don't crash startup. The handler maps key → action string and `emit_to("prompter", "shortcut", action)` (`lib.rs:834-841`); `ReadView.jsx:152-161` translates actions into the same local state used by the on-screen controls (`pause`→`togglePause`, `faster`/`slower`→speed index, `reset`→scroll to top, `stop`→`handleDone`). Shortcuts therefore only have an effect while `ReadView` is mounted, except `stop`, which is also emitted by the backend before hiding/recreating the window.
+Registered in `setup()` using `tauri-plugin-global-shortcut` (`lib.rs:809-843`). On macOS both `⌘⇧` (SUPER) and `⌃⇧` (CONTROL) variants are registered for `Space`, `ArrowUp`, `ArrowDown`, `KeyR`, and (this fork) `KeyE` — the `"edit"` action, which shows the prompter window and is handled app-level in `App.jsx` to open the editor from the idle pill; Windows builds register only `Ctrl+Shift` variants. Registration failures are silently skipped (`let _ =`, `lib.rs:832`) so OS-taken combos don't crash startup. The handler maps key → action string and `emit_to("prompter", "shortcut", action)` (`lib.rs:834-841`); `ReadView.jsx:152-161` translates actions into the same local state used by the on-screen controls (`pause`→`togglePause`, `faster`/`slower`→speed index, `reset`→scroll to top, `stop`→`handleDone`). Shortcuts therefore only have an effect while `ReadView` is mounted, except `stop`, which is also emitted by the backend before hiding/recreating the window.
 
 ---
 
