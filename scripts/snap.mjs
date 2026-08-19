@@ -28,7 +28,10 @@ const STATES = [
   { name: 'edit', view: 'edit', theme: 'light' },
   { name: 'read', view: 'read', theme: 'dark' },
   { name: 'read', view: 'read', theme: 'light' },
-  // Fork additions: AI review panel and word-tracking read states
+  // Fork additions: hover state (quit control), AI review panel,
+  // and word-tracking read states
+  { name: 'idle-hover', view: 'idle', theme: 'dark', params: 'hoverdemo=1' },
+  { name: 'idle-hover', view: 'idle', theme: 'light', params: 'hoverdemo=1' },
   { name: 'edit-aireview', view: 'edit', theme: 'dark', params: 'aireview=1' },
   { name: 'edit-aireview', view: 'edit', theme: 'light', params: 'aireview=1' },
   { name: 'read-tracking', view: 'read', theme: 'dark', params: 'trackdemo=1' },
