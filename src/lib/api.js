@@ -1,5 +1,7 @@
-const tauriInvoke = window.__TAURI__?.core?.invoke ?? (() => Promise.resolve(null))
-const tauriListen = window.__TAURI__?.event?.listen ?? (() => Promise.resolve(() => {}))
+// Guard `window` so modules importing this are loadable in Node (vitest)
+const tauri = typeof window !== 'undefined' ? window.__TAURI__ : undefined
+const tauriInvoke = tauri?.core?.invoke ?? (() => Promise.resolve(null))
+const tauriListen = tauri?.event?.listen ?? (() => Promise.resolve(() => {}))
 
 export const API = {
   elevateNotchWindow: () => invoke('elevate_notch_window'),
@@ -24,4 +26,6 @@ export const API = {
   stopSpeech: () => tauriInvoke('stop_speech'),
   getSpeechStatus: () => tauriInvoke('get_speech_status'),
   onSpeechMsg: (cb) => tauriListen('speech-msg', (e) => cb(e.payload)),
+  openSettings: () => tauriInvoke('open_settings'),
+  aiComplete: (system, prompt) => tauriInvoke('ai_complete', { system, prompt }),
 }
