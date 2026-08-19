@@ -17,6 +17,7 @@
   --read-controls-bg: linear-gradient(to top, rgba(17,17,17,0.99) 70%, transparent);
   --script-text:     rgba(255,255,255,0.92);
   --caret:           #818cf8;
+  --scrollbar-thumb: rgba(255,255,255,0.28);
 }
 
 [data-theme="light"] {
@@ -37,10 +38,24 @@
   --read-controls-bg: linear-gradient(to top, rgba(230,230,230,0.99) 70%, transparent);
   --script-text:     rgba(0,0,0,0.88);
   --caret:           #6366f1;
+  --scrollbar-thumb: rgba(0,0,0,0.30);
 }
 
 /* ── Reset ────────────────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+/* ── Scrollbars — overlay style, everywhere ────────────────
+   Thin, transparent track, subtle theme-tinted thumb. Static pseudo styles
+   only: WKWebView ignores the standard scrollbar-color property (and any
+   scrollbar-width/-color declaration disables ::-webkit-scrollbar styling),
+   and it does not repaint scrollbar pseudos on :hover or class changes — so
+   a dynamic reveal cannot work. When the system uses overlay scrollers this
+   CSS is ignored entirely and macOS auto-hides natively; when it uses
+   always-on scrollers (the white-track case) these styles apply. */
+*::-webkit-scrollbar { width: 6px; height: 6px; background: transparent; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-corner { background: transparent; }
+*::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 6px; }
 
 html, body, #root {
   width: 100%; height: 100%;

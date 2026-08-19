@@ -143,9 +143,16 @@ export default function App() {
         setScriptText('Welcome to the bilingual teleprompter demo.')
       }
       if (v === 'edit') {
+        // ?scrolldemo=1 pads the doc so the editor overflows — used to verify
+        // overlay scrollbar rendering in the real app
+        const doc = q.has('scrolldemo')
+          ? { ...DEMO_DOC, content: [...DEMO_DOC.content, ...Array.from({ length: 24 }, (_, i) => (
+              { type: 'paragraph', content: [{ type: 'text', text: `Filler line ${i + 1} so the script overflows the editor.` }] }
+            ))] }
+          : DEMO_DOC
         setScripts([
-          { name: 'Product Demo', text: 'Welcome to the bilingual teleprompter demo.', content: JSON.stringify(DEMO_DOC) },
-          { name: '发布稿 Launch Notes', text: '', content: JSON.stringify(DEMO_DOC) },
+          { name: 'Product Demo', text: 'Welcome to the bilingual teleprompter demo.', content: JSON.stringify(doc) },
+          { name: '发布稿 Launch Notes', text: '', content: JSON.stringify(doc) },
         ])
         setCurrentScriptIndex(0)
       }
