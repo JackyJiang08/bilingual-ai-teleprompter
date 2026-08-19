@@ -80,7 +80,14 @@ pub struct Config {
     pub auto_scroll: bool,
     pub mic_device_id: String,
     pub theme: String,
+    #[serde(default = "default_speech_lang")]
+    pub speech_lang: String,
+    #[serde(default = "default_word_tracking")]
+    pub word_tracking: bool,
 }
+
+fn default_speech_lang() -> String { "en-US".to_string() }
+fn default_word_tracking() -> bool { true }
 
 impl Default for Config {
     fn default() -> Self {
@@ -99,6 +106,8 @@ impl Default for Config {
             auto_scroll: true,         // voice input: ON by default (both platforms)
             mic_device_id: "default".to_string(),
             theme: "dark".to_string(),
+            speech_lang: default_speech_lang(),
+            word_tracking: default_word_tracking(),
         }
     }
 }
@@ -114,9 +123,10 @@ pub struct Script {
 
 // ── App state ──────────────────────────────────────────────
 pub struct AppState {
-    config:      Mutex<Config>,
-    classic_pos: Mutex<Option<(f64, f64)>>,
-
+    config:        Mutex<Config>,
+    classic_pos:   Mutex<Option<(f64, f64)>>,
+    speech_child:  Mutex<Option<tauri_plugin_shell::process::CommandChild>>,
+    speech_status: Mutex<serde_json::Value>,
 }
 
 // ── File paths ─────────────────────────────────────────────
@@ -294,6 +304,8 @@ fn set_config(app: AppHandle, state: State<AppState>, patch: serde_json::Value) 
     if let Some(v) = patch.get("autoScroll").and_then(|v| v.as_bool()) { cfg.auto_scroll = v; }
     if let Some(v) = patch.get("micDeviceId").and_then(|v| v.as_str()) { cfg.mic_device_id = v.to_string(); }
     if let Some(v) = patch.get("theme").and_then(|v| v.as_str()) { cfg.theme = v.to_string(); }
+    if let Some(v) = patch.get("speechLang").and_then(|v| v.as_str()) { cfg.speech_lang = v.to_string(); }
+    if let Some(v) = patch.get("wordTracking").and_then(|v| v.as_bool()) { cfg.word_tracking = v; }
 
     let cfg_clone = cfg.clone();
     save_config(&cfg_clone);
@@ -506,6 +518,91 @@ fn open_url(_app: AppHandle, url: String) {
     let _ = open::that(url);
 }
 
+// ── Speech sidecar (on-device recognition) ─────────────────
+// Spawns the bundled speech-sidecar binary and forwards its NDJSON stdout
+// lines to all windows as `speech-msg` events. The frontend owns matching,
+// fallback, and restart policy; Rust only supervises the process.
+
+fn kill_speech_child(state: &AppState) {
+    if let Some(child) = state.speech_child.lock().unwrap().take() {
+        let _ = child.kill();
+    }
+}
+
+#[tauri::command]
+fn start_speech(app: AppHandle, state: State<AppState>, locale: String) -> Result<(), String> {
+    use tauri_plugin_shell::process::CommandEvent;
+    use tauri_plugin_shell::ShellExt;
+
+    kill_speech_child(&state);
+    *state.speech_status.lock().unwrap() =
+        serde_json::json!({ "type": "starting", "locale": locale });
+
+    let (mut rx, child) = app
+        .shell()
+        .sidecar("speech-sidecar")
+        .map_err(|e| e.to_string())?
+        .args(["--locale", &locale])
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    *state.speech_child.lock().unwrap() = Some(child);
+
+    let app2 = app.clone();
+    tauri::async_runtime::spawn(async move {
+        while let Some(event) = rx.recv().await {
+            match event {
+                CommandEvent::Stdout(line) => {
+                    let s = String::from_utf8_lossy(&line);
+                    if let Ok(v) = serde_json::from_str::<serde_json::Value>(&s) {
+                        let msg_type = v.get("type").and_then(|t| t.as_str()).unwrap_or("");
+                        if msg_type == "ready" || msg_type == "error" {
+                            if let Some(st) = app2.try_state::<AppState>() {
+                                *st.speech_status.lock().unwrap() = v.clone();
+                            }
+                        }
+                        let _ = app2.emit("speech-msg", v);
+                    }
+                }
+                CommandEvent::Stderr(line) => {
+                    eprintln!("[speech-sidecar] {}", String::from_utf8_lossy(&line));
+                }
+                CommandEvent::Terminated(payload) => {
+                    let msg = serde_json::json!({
+                        "type": "terminated",
+                        "code": payload.code,
+                    });
+                    if let Some(st) = app2.try_state::<AppState>() {
+                        st.speech_child.lock().unwrap().take();
+                        // Keep a fatal error as the surfaced status; otherwise
+                        // record the termination itself.
+                        let mut status = st.speech_status.lock().unwrap();
+                        let is_fatal_error = status.get("type").and_then(|t| t.as_str()) == Some("error")
+                            && status.get("fatal").and_then(|f| f.as_bool()).unwrap_or(false);
+                        if !is_fatal_error {
+                            *status = msg.clone();
+                        }
+                    }
+                    let _ = app2.emit("speech-msg", msg);
+                    break;
+                }
+                _ => {}
+            }
+        }
+    });
+    Ok(())
+}
+
+#[tauri::command]
+fn stop_speech(state: State<AppState>) {
+    kill_speech_child(&state);
+    *state.speech_status.lock().unwrap() = serde_json::json!({ "type": "stopped" });
+}
+
+#[tauri::command]
+fn get_speech_status(state: State<AppState>) -> serde_json::Value {
+    state.speech_status.lock().unwrap().clone()
+}
+
 // ── Window creation ────────────────────────────────────────
 
 fn create_prompter_window(app: &AppHandle) {
@@ -647,14 +744,16 @@ pub fn run() {
     eprintln!("[OT] starting up");
     let config = load_config();
     let state  = AppState {
-        config:      Mutex::new(config),
-        classic_pos: Mutex::new(None),
-
+        config:        Mutex::new(config),
+        classic_pos:   Mutex::new(None),
+        speech_child:  Mutex::new(None),
+        speech_status: Mutex::new(serde_json::json!({ "type": "stopped" })),
     };
 
     tauri::Builder::default()
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_positioner::init())
         .manage(state)
         .invoke_handler(tauri::generate_handler![
@@ -667,6 +766,7 @@ pub fn run() {
             set_movable, move_window, get_window_pos,
             close_welcome, open_url, open_settings,
             focus_prompter, elevate_notch_window,
+            start_speech, stop_speech, get_speech_status,
         ])
         .setup(|app| {
             let app_handle = app.handle().clone();
@@ -853,6 +953,14 @@ pub fn run() {
                 // Note: do NOT prevent prompter close — switch_mode needs to close and recreate it
             }
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while running tauri application")
+        .run(|app, event| {
+            // Make sure the speech sidecar never outlives the app
+            if let tauri::RunEvent::Exit = event {
+                if let Some(st) = app.try_state::<AppState>() {
+                    kill_speech_child(&st);
+                }
+            }
+        });
 }

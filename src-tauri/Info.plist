@@ -4,6 +4,8 @@
 <dict>
   <key>NSMicrophoneUsageDescription</key>
   <string>OpenTeleprompter uses your microphone to detect when you're speaking and scroll your script automatically.</string>
+  <key>NSSpeechRecognitionUsageDescription</key>
+  <string>OpenTeleprompter uses on-device speech recognition to follow your reading position in the script. No audio or transcripts leave your Mac.</string>
   <key>LSUIElement</key>
   <true/>
 </dict>

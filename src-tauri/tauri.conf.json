@@ -4,9 +4,9 @@
   "version": "3.0.0",
   "identifier": "com.openteleprompter.teleprompter",
   "build": {
-    "beforeDevCommand": "npm run dev:react",
+    "beforeDevCommand": "npm run build:sidecar && npm run dev:react",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "npm run build:frontend",
+    "beforeBuildCommand": "npm run build:sidecar && npm run build:frontend",
     "frontendDist": "../dist"
   },
   "app": {
@@ -21,6 +21,7 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "externalBin": ["binaries/speech-sidecar"],
     "icon": [
       "icons/icon.icns",
       "icons/icon.ico",

@@ -25,6 +25,7 @@ objc2-app-kit = { version = "0.3", features = ["NSWindow", "NSPanel", "NSScreen"
 objc2-foundation = { version = "0.3", features = ["NSString", "NSGeometry"] }
 tauri-plugin-global-shortcut = "2"
 tauri-plugin-fs = "2"
+tauri-plugin-shell = "2"
 tauri-plugin-positioner = { version = "2", features = ["tray-icon"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

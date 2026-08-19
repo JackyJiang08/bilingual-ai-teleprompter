@@ -26,6 +26,9 @@ dist-ssr
 # Rust build artifacts
 src-tauri/target/
 
+# Compiled sidecar binaries (built by scripts/build-sidecar.sh)
+src-tauri/binaries/
+
 # Old Vite files (not needed)
 public/
 vite.config.ts
