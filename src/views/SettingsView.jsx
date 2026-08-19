@@ -89,6 +89,14 @@ export default function SettingsView() {
 
   // Load config + mics on mount
   useEffect(() => {
+    // Demo/test hook (scripts/snap.mjs): ?theme= forces the panel theme.
+    // Params are never present in normal operation.
+    const forcedTheme = new URLSearchParams(window.location.search).get('theme')
+    if (forcedTheme) {
+      setTheme(forcedTheme)
+      document.documentElement.setAttribute('data-theme', forcedTheme)
+    }
+
     API.getConfig().then(cfg => {
       if (cfg) {
         applyConfig(cfg)

@@ -36,18 +36,21 @@ const STATES = [
   { name: 'edit-aireview', view: 'edit', theme: 'light', params: 'aireview=1' },
   { name: 'read-tracking', view: 'read', theme: 'dark', params: 'trackdemo=1' },
   { name: 'read-tracking', view: 'read', theme: 'light', params: 'trackdemo=1' },
+  // Settings window (its own page/bundle; selector is the settings panel)
+  { name: 'settings', page: 'settings.html', selector: '#panel', view: 'idle', theme: 'dark' },
+  { name: 'settings', page: 'settings.html', selector: '#panel', view: 'idle', theme: 'light' },
 ]
 
-async function getPage(browser, { view, theme, params }) {
+async function getPage(browser, { view, theme, params, page: pagePath = '', selector = '#island' }) {
   const page = await browser.newPage()
   await page.setViewport({ width: 1440, height: 900 })
-  const url = `${BASE_URL}/?view=${view}&mode=notch&theme=${theme}${params ? `&${params}` : ''}`
+  const url = `${BASE_URL}/${pagePath}?view=${view}&mode=notch&theme=${theme}${params ? `&${params}` : ''}`
   await page.goto(url, { waitUntil: 'networkidle0' })
-  await page.waitForSelector('#island')
+  await page.waitForSelector(selector)
   await new Promise(r => setTimeout(r, 700)) // let animations settle
 
-  // Clip to island + small padding
-  const box = await page.$eval('#island', el => {
+  // Clip to the target element + small padding
+  const box = await page.$eval(selector, el => {
     const r = el.getBoundingClientRect()
     return { x: r.left, y: r.top, width: r.width, height: r.height }
   })
