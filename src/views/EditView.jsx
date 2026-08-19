@@ -49,6 +49,23 @@ export default function EditView() {
     },
   })
 
+  // Browser-only visual-test hook (scripts/snap.mjs): ?aireview=1 renders
+  // the Prepare-with-AI review panel with fixed sample content
+  useEffect(() => {
+    if (window.__TAURI__) return
+    if (!new URLSearchParams(window.location.search).has('aireview')) return
+    const originalText =
+      'Hello everyone, today I want to give you an update on our project. ' +
+      '我们的项目进展非常顺利，团队在过去六个月里完成了核心功能的开发。'
+    setReview({
+      originalDoc: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: originalText }] }] },
+      originalText,
+      prepared:
+        'Hello everyone [PAUSE]\ntoday I want to give you\nan update on our project\n\n' +
+        '我们的项目\n进展非常顺利 [SLOW]\n团队在过去六个月里\n完成了核心功能的开发',
+    })
+  }, [])
+
   // Load script when editor is ready
   useEffect(() => {
     if (!editor) return

@@ -18,20 +18,28 @@ const BASE_URL = 'http://localhost:1420'
 const SNAP_DIR = path.resolve('.snapshots/notch')
 const DIFF_THRESHOLD = 100 // max pixels allowed to differ
 
-// The 6 notch states we care about
+// The notch states we care about. `name` keys the golden file; `params`
+// appends extra browser-only test-hook query params (see src/App.jsx,
+// src/views/EditView.jsx, src/views/ReadView.jsx).
 const STATES = [
-  { view: 'idle', theme: 'dark' },
-  { view: 'idle', theme: 'light' },
-  { view: 'edit', theme: 'dark' },
-  { view: 'edit', theme: 'light' },
-  { view: 'read', theme: 'dark' },
-  { view: 'read', theme: 'light' },
+  { name: 'idle', view: 'idle', theme: 'dark' },
+  { name: 'idle', view: 'idle', theme: 'light' },
+  { name: 'edit', view: 'edit', theme: 'dark' },
+  { name: 'edit', view: 'edit', theme: 'light' },
+  { name: 'read', view: 'read', theme: 'dark' },
+  { name: 'read', view: 'read', theme: 'light' },
+  // Fork additions: AI review panel and word-tracking read states
+  { name: 'edit-aireview', view: 'edit', theme: 'dark', params: 'aireview=1' },
+  { name: 'edit-aireview', view: 'edit', theme: 'light', params: 'aireview=1' },
+  { name: 'read-tracking', view: 'read', theme: 'dark', params: 'trackdemo=1' },
+  { name: 'read-tracking', view: 'read', theme: 'light', params: 'trackdemo=1' },
 ]
 
-async function getPage(browser, view, theme) {
+async function getPage(browser, { view, theme, params }) {
   const page = await browser.newPage()
   await page.setViewport({ width: 1440, height: 900 })
-  await page.goto(`${BASE_URL}/?view=${view}&mode=notch&theme=${theme}`, { waitUntil: 'networkidle0' })
+  const url = `${BASE_URL}/?view=${view}&mode=notch&theme=${theme}${params ? `&${params}` : ''}`
+  await page.goto(url, { waitUntil: 'networkidle0' })
   await page.waitForSelector('#island')
   await new Promise(r => setTimeout(r, 700)) // let animations settle
 
@@ -73,9 +81,9 @@ async function run(cmd) {
     fs.mkdirSync(SNAP_DIR, { recursive: true })
     console.log('📸  Saving notch golden snapshots...\n')
 
-    for (const { view, theme } of STATES) {
-      const name = `notch__${view}__${theme}.png`
-      const buf = await getPage(browser, view, theme)
+    for (const state of STATES) {
+      const name = `notch__${state.name}__${state.theme}.png`
+      const buf = await getPage(browser, state)
       fs.writeFileSync(path.join(SNAP_DIR, name), buf)
       console.log(`  ✅  ${name}`)
     }
@@ -90,8 +98,8 @@ async function run(cmd) {
     console.log('🔍  Checking notch mode for regressions...\n')
     let failed = 0
 
-    for (const { view, theme } of STATES) {
-      const name = `notch__${view}__${theme}.png`
+    for (const state of STATES) {
+      const name = `notch__${state.name}__${state.theme}.png`
       const goldenPath = path.join(SNAP_DIR, name)
 
       if (!fs.existsSync(goldenPath)) {
@@ -99,7 +107,7 @@ async function run(cmd) {
         continue
       }
 
-      const current = await getPage(browser, view, theme)
+      const current = await getPage(browser, state)
       const golden = fs.readFileSync(goldenPath)
 
       // Quick hash check first (fast path)

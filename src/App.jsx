@@ -22,8 +22,19 @@ const CLASSIC_SIZES = {
   read:      { w: 460, h: 240 },
 }
 
+// Sample script for browser-only visual tests (?view=read): exercises
+// English, mixed-script, and Chinese rendering plus cue markers
+const DEMO_DOC = {
+  type: 'doc',
+  content: [
+    { type: 'paragraph', content: [{ type: 'text', text: 'Welcome to the bilingual teleprompter demo.' }] },
+    { type: 'paragraph', content: [{ type: 'text', text: '我们的React项目 launches today [PAUSE] stay tuned.' }] },
+    { type: 'paragraph', content: [{ type: 'text', text: '今天天气很好 我们出去走走 [BREATHE] 慢慢来。' }] },
+  ],
+}
+
 export default function App() {
-  const { view, config, setConfig, setScripts, setView } = useAppStore()
+  const { view, config, setConfig, setScripts, setView, setScriptDoc, setScriptText } = useAppStore()
   const [isHovered, setIsHovered] = useState(false)
   const isClassic = config.mode === 'classic'
 
@@ -79,6 +90,22 @@ export default function App() {
     navigator.mediaDevices?.getUserMedia({ audio: true })
       .then(s => s.getTracks().forEach(t => t.stop()))
       .catch(() => {})
+
+    // Browser-only test hooks (scripts/snap.mjs): drive view/mode/theme via
+    // URL params, e.g. /?view=read&mode=notch&theme=light. No-op in Tauri.
+    if (!window.__TAURI__) {
+      const q = new URLSearchParams(window.location.search)
+      const patch = {}
+      if (q.get('mode')) patch.mode = q.get('mode')
+      if (q.get('theme')) patch.theme = q.get('theme')
+      if (Object.keys(patch).length) setConfig(patch)
+      const v = q.get('view')
+      if (v === 'read') {
+        setScriptDoc(DEMO_DOC)
+        setScriptText('Welcome to the bilingual teleprompter demo.')
+      }
+      if (v) setView(v)
+    }
   }, [])
 
   // ── Side-effects from config ───────────────────────────────
