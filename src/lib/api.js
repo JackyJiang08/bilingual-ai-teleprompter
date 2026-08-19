@@ -20,4 +20,8 @@ export const API = {
   startDrag: () => tauriInvoke('start_drag'),
   onShortcut: (cb) => tauriListen('shortcut', (e) => cb(e.payload)),
   focusPrompter: () => tauriInvoke('focus_prompter'),
+  startSpeech: (locale) => tauriInvoke('start_speech', { locale }),
+  stopSpeech: () => tauriInvoke('stop_speech'),
+  getSpeechStatus: () => tauriInvoke('get_speech_status'),
+  onSpeechMsg: (cb) => tauriListen('speech-msg', (e) => cb(e.payload)),
 }

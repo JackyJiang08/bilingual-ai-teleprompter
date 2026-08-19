@@ -3,9 +3,16 @@ import { tokenizeDoc } from '../lib/tokenizer'
 import { useAppStore } from '../store'
 import { API } from '../lib/api'
 import { createMicEngine, SPEEDS, SCROLL_SPEED_BASE } from '../lib/mic'
+import { createSpeechTracker } from '../lib/speech'
+
+// When word tracking drives the scroll, the current word is eased toward
+// this fraction of the viewport height (the "reading line").
+const READING_LINE = 0.35
+// Per-16.7ms-frame smoothing factor for cursor-following scroll.
+const FOLLOW_SMOOTHING = 0.06
 
 export default function ReadView() {
-  const { scriptText, scriptDoc, config, setView } = useAppStore()
+  const { scriptText, scriptDoc, config, setView, setRecognition } = useAppStore()
   const tokens = scriptDoc ? tokenizeDoc(scriptDoc) : []
 
   // Live config refs — updated whenever config changes, used inside RAF/mic without remount
@@ -20,6 +27,8 @@ export default function ReadView() {
   )
   const [fontSize, setFontSize] = useState(config.fontSize || 16)
   const [micStatus, setMicStatus] = useState('Waiting…')
+  // Word-tracking cursor for rendering: active + token index of next expected word
+  const [track, setTrack] = useState({ active: false, cursor: -1, done: false })
 
   // Refs for values used inside RAF/interval (must not be stale)
   const isPausedRef = useRef(false)
@@ -31,45 +40,100 @@ export default function ReadView() {
   const rafRef = useRef(null)
   const scrollVPRef = useRef(null)
   const scriptTextRef = useRef(null)
-  const markerRefs = useRef({})     // token index → DOM el
+  const markerRefs = useRef({})     // token index → DOM el (markers)
+  const wordRefs = useRef({})       // token index → DOM el (words)
   const firedMarkers = useRef(new Set()) // indices already fired
-  const speedIdxSetRef = useRef(null) // ref to setSpeedIdx for use inside RAF
   const micEngineRef = useRef(null)
+  const speechTrackerRef = useRef(null)
+  const trackRef = useRef({ active: false, cursor: -1, done: false })
   const silenceTimer = useRef(null)
-  const isCountingDownRef = useRef(false)
 
   // Keep refs in sync
   useEffect(() => { isPausedRef.current = isPaused }, [isPaused])
   useEffect(() => { isSpeakingRef.current = isSpeaking }, [isSpeaking])
   useEffect(() => { speedIdxRef.current = speedIdx }, [speedIdx])
 
-  // React to live config changes while ReadView is mounted
+  function setTrackBoth(next) {
+    trackRef.current = next
+    setTrack(next)
+  }
+
+  // ── Engines ────────────────────────────────────────────────
+  function startVadEngine() {
+    if (micEngineRef.current) return
+    const engine = createMicEngine({
+      threshold: configRef.current.threshold,
+      onSpeaking: () => { isSpeakingRef.current = true; setIsSpeaking(true); setMicStatus('Speaking') },
+      onSilence:  () => { isSpeakingRef.current = false; setIsSpeaking(false); setMicStatus('Waiting…') },
+      onError:    () => setMicStatus('Mic error'),
+    })
+    micEngineRef.current = engine
+    engine.start(configRef.current.micDeviceId)
+  }
+
+  function startSpeechTracker() {
+    const firstWord = tokens.findIndex(t => t.type === 'word')
+    setTrackBoth({ active: true, cursor: firstWord, done: firstWord === -1 })
+    setRecognition({ engine: 'speech', status: 'starting', message: '', cursorTokenIndex: firstWord })
+
+    const tracker = createSpeechTracker({
+      locale: configRef.current.speechLang || 'en-US',
+      tokens,
+      onUpdate: (pos) => {
+        setTrackBoth({ active: true, cursor: pos.cursorTokenIndex, done: pos.done })
+        isSpeakingRef.current = pos.speaking
+        setIsSpeaking(pos.speaking)
+        setRecognition({
+          cursorTokenIndex: pos.cursorTokenIndex,
+          matchedCount: pos.matchedCount,
+          total: pos.total,
+          confidence: pos.confidence,
+        })
+        if (pos.speaking) setMicStatus('Tracking')
+      },
+      onStatus: (status, message) => {
+        setRecognition({ status, message })
+        if (status === 'listening') setMicStatus('Listening (on-device)')
+        else if (status === 'starting') setMicStatus('Starting…')
+      },
+      onFallback: (message) => {
+        // Word tracking unavailable → frequency-based activation, old behavior
+        speechTrackerRef.current = null
+        setTrackBoth({ active: false, cursor: -1, done: false })
+        setRecognition({ engine: 'vad', status: 'error', message })
+        setMicStatus('Voice detection')
+        startVadEngine()
+      },
+    })
+    speechTrackerRef.current = tracker
+    tracker.start()
+  }
+
+  function stopEngines() {
+    speechTrackerRef.current?.stop()
+    speechTrackerRef.current = null
+    micEngineRef.current?.stop()
+    micEngineRef.current = null
+  }
+
+  // React to live config changes while ReadView is mounted (VAD engine only —
+  // the speech tracker takes locale at start and is restarted per session)
   useEffect(() => {
-    // Opacity applied globally in App.jsx already
-    // Sync speed from settings — use closest match to handle float precision
     if (config.scrollSpeed !== undefined) {
       const i = SPEEDS.reduce((best, s, idx) =>
         Math.abs(s - config.scrollSpeed) < Math.abs(SPEEDS[best] - config.scrollSpeed) ? idx : best
       , 0)
       setSpeedIdx(i)
     }
-    // Threshold update
     micEngineRef.current?.setThreshold(config.threshold)
-    // If mic device changed, restart mic
-    if (configRef.current.micDeviceId !== config.micDeviceId) {
-      micEngineRef.current?.stop()
-      const engine = createMicEngine({
-        threshold: config.threshold,
-        onSpeaking: () => { isSpeakingRef.current = true; setIsSpeaking(true); setMicStatus('Speaking') },
-        onSilence:  () => { isSpeakingRef.current = false; setIsSpeaking(false); setMicStatus('Waiting…') },
-        onError:    () => setMicStatus('Mic error'),
-      })
-      micEngineRef.current = engine
-      engine.start(config.micDeviceId)
+    if (micEngineRef.current && configRef.current.micDeviceId !== config.micDeviceId) {
+      micEngineRef.current.stop()
+      micEngineRef.current = null
+      startVadEngine()
     }
   }, [config.threshold, config.micDeviceId, config.autoScroll, config.scrollSpeed])
 
-  // On mount: set content, start mic, start scroll loop
+  // On mount: set content, start engines, start scroll loop
   useEffect(() => {
     // Cue marker checker — fires actions when markers enter reading zone
     function checkMarkers() {
@@ -114,38 +178,59 @@ export default function ReadView() {
       })
     }
 
-    // Start scroll RAF
+    // Scroll RAF — two modes:
+    //  • word tracking: ease scroll toward the current word's reading line
+    //  • legacy: constant speed while the VAD hears speech (or autoScroll)
     function loop(ts) {
       const paused = isPausedRef.current || isHoverPausedRef.current
-      const shouldScroll = configRef.current.autoScroll ? !paused : (isSpeakingRef.current && !paused)
+      const delta = lastFrameRef.current ? Math.min((ts - lastFrameRef.current) / 16.667, 3) : 1
+      lastFrameRef.current = ts
+      const vp = scrollVPRef.current
+      const st = scriptTextRef.current
+      const t = trackRef.current
 
-      if (shouldScroll && scrollVPRef.current && scriptTextRef.current) {
-        const delta = lastFrameRef.current ? Math.min((ts - lastFrameRef.current) / 16.667, 3) : 1
-        lastFrameRef.current = ts
-        const maxScroll = scriptTextRef.current.scrollHeight - scrollVPRef.current.clientHeight
-        if (scrollPosRef.current < maxScroll - 1) {
-          scrollPosRef.current += SCROLL_SPEED_BASE * SPEEDS[speedIdxRef.current] * delta
-          scrollPosRef.current = Math.min(scrollPosRef.current, maxScroll)
-          scriptTextRef.current.style.transform = `translateY(${-scrollPosRef.current}px)`
+      if (vp && st && !paused) {
+        const maxScroll = Math.max(0, st.scrollHeight - vp.clientHeight)
+        if (t.active) {
+          // Follow the reader's position
+          let target = scrollPosRef.current
+          if (t.done) {
+            target = maxScroll
+          } else {
+            const el = t.cursor >= 0 ? wordRefs.current[t.cursor] : null
+            if (el) target = el.offsetTop - vp.clientHeight * READING_LINE
+          }
+          target = Math.max(0, Math.min(target, maxScroll))
+          const k = 1 - Math.pow(1 - FOLLOW_SMOOTHING, delta)
+          const next = scrollPosRef.current + (target - scrollPosRef.current) * k
+          if (Math.abs(next - scrollPosRef.current) > 0.01) {
+            scrollPosRef.current = next
+            st.style.transform = `translateY(${-scrollPosRef.current}px)`
+          }
+          checkMarkers()
+        } else {
+          const shouldScroll = configRef.current.autoScroll ? true : isSpeakingRef.current
+          if (shouldScroll && scrollPosRef.current < maxScroll - 1) {
+            scrollPosRef.current += SCROLL_SPEED_BASE * SPEEDS[speedIdxRef.current] * delta
+            scrollPosRef.current = Math.min(scrollPosRef.current, maxScroll)
+            st.style.transform = `translateY(${-scrollPosRef.current}px)`
+            checkMarkers()
+          }
         }
-        // Check cue markers in reading zone (top 40% of viewport)
-        checkMarkers()
-      } else {
-        lastFrameRef.current = 0
       }
       rafRef.current = requestAnimationFrame(loop)
     }
     rafRef.current = requestAnimationFrame(loop)
 
-    // Start mic
-    const engine = createMicEngine({
-      threshold: configRef.current.threshold,
-      onSpeaking: () => { isSpeakingRef.current = true; setIsSpeaking(true); setMicStatus('Speaking') },
-      onSilence:  () => { isSpeakingRef.current = false; setIsSpeaking(false); setMicStatus('Waiting…') },
-      onError:    () => setMicStatus('Mic error'),
-    })
-    micEngineRef.current = engine
-    engine.start(configRef.current.micDeviceId)
+    // Start recognition: word tracking when enabled (and running inside
+    // Tauri), otherwise the frequency-based VAD engine
+    const wantSpeech = configRef.current.wordTracking !== false && !!window.__TAURI__
+    if (wantSpeech && tokens.some(t => t.type === 'word')) {
+      startSpeechTracker()
+    } else {
+      setRecognition({ engine: 'vad', status: 'idle', message: '' })
+      startVadEngine()
+    }
 
     // Shortcuts — capture unlisten fn for cleanup
     let unlistenShortcut
@@ -153,17 +238,15 @@ export default function ReadView() {
       if (action === 'pause') togglePause()
       if (action === 'faster') setSpeedIdx(i => Math.min(SPEEDS.length - 1, i + 1))
       if (action === 'slower') setSpeedIdx(i => Math.max(0, i - 1))
-      if (action === 'reset') {
-        scrollPosRef.current = 0
-        if (scriptTextRef.current) scriptTextRef.current.style.transform = 'translateY(0px)'
-      }
+      if (action === 'reset') handleReset()
       if (action === 'stop') handleDone()
     }).then(fn => { unlistenShortcut = fn })
 
     return () => {
       if (rafRef.current) cancelAnimationFrame(rafRef.current)
       if (silenceTimer.current) clearTimeout(silenceTimer.current)
-      micEngineRef.current?.stop()
+      stopEngines()
+      setRecognition({ engine: 'none', status: 'idle', message: '', cursorTokenIndex: -1, matchedCount: 0, confidence: 0 })
       unlistenShortcut?.()
     }
   }, [])
@@ -179,7 +262,7 @@ export default function ReadView() {
   function handleDone() {
     if (rafRef.current) cancelAnimationFrame(rafRef.current)
     if (silenceTimer.current) clearTimeout(silenceTimer.current)
-    micEngineRef.current?.stop()
+    stopEngines()
     API.setIgnoreMouse(false)
     setView('idle') // App.jsx resize effect handles window resize on view change
   }
@@ -188,6 +271,7 @@ export default function ReadView() {
     scrollPosRef.current = 0
     if (scriptTextRef.current) scriptTextRef.current.style.transform = 'translateY(0px)'
     firedMarkers.current.clear() // reset so markers fire again on replay
+    speechTrackerRef.current?.reset()
   }
 
   function handleMouseEnter() {
@@ -209,6 +293,14 @@ export default function ReadView() {
   }
 
   const micRingClass = `mic-ring${isSpeaking ? '' : ' paused'}`
+
+  // Word-tracking display state for a token index: '' | 'spoken' | 'current'
+  function tokenTrackClass(i) {
+    if (!track.active) return ''
+    if (track.done || i < track.cursor) return ' tok-spoken'
+    if (i === track.cursor) return ' tok-current'
+    return ''
+  }
 
   return (
     <div
@@ -239,7 +331,7 @@ export default function ReadView() {
                 key={i}
                 ref={el => { markerRefs.current[i] = el }}
                 data-marker={token.marker}
-                className={`read-marker read-marker-${token.marker.toLowerCase()}`}
+                className={`read-marker read-marker-${token.marker.toLowerCase()}${tokenTrackClass(i) === ' tok-spoken' ? ' tok-spoken' : ''}`}
               >
                 {token.text}
               </span>
@@ -247,12 +339,14 @@ export default function ReadView() {
             return (
               <span
                 key={i}
+                ref={el => { wordRefs.current[i] = el }}
+                className={`tok${tokenTrackClass(i)}`}
                 style={{
                   fontWeight: token.bold ? 700 : undefined,
                   color: token.color || undefined,
                 }}
               >
-                {token.text}{' '}
+                {token.text}{token.spaceAfter === false ? '' : ' '}
               </span>
             )
           }) : scriptText}

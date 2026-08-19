@@ -454,6 +454,16 @@ body.mode-classic .idle-chevron {
   font-weight: 500; line-height: 1.6;
   color: var(--script-text); will-change: transform;
 }
+/* Word-tracking token states (speech recognition mode) */
+#script-text .tok { transition: opacity 0.3s ease; }
+#script-text .tok-spoken { opacity: 0.35; }
+#script-text .tok-current {
+  text-decoration: underline;
+  text-decoration-color: var(--accent);
+  text-decoration-thickness: 2px;
+  text-underline-offset: 3px;
+}
+.read-marker.tok-spoken { opacity: 0.35; }
 #vol-meter-wrap {
   position: absolute; bottom: 40px; left: 10px; right: 10px;
   display: flex; align-items: center; gap: 6px;

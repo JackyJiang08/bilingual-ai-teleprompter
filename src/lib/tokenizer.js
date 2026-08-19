@@ -1,5 +1,5 @@
 // Converts Tiptap JSON doc → flat token array for word-by-word rendering
-// Token: { type: 'word'|'marker'|'newline', text, bold, color, marker, cjk }
+// Token: { type: 'word'|'marker'|'newline', text, bold, color, marker, cjk, spaceAfter }
 //
 // CJK text has no spaces, so runs of CJK ideographs are split into one token
 // per character (cjk: true) — this is what lets the speech-tracking cursor
@@ -50,15 +50,20 @@ export function tokenizeDoc(doc) {
           tokens.push({ type: 'marker', text: word, marker: markerMatch[1].toUpperCase() })
           continue
         }
-        for (const piece of splitCJK(word)) {
+        // Only the last piece of a whitespace-delimited chunk had whitespace
+        // after it in the source — pieces split out of the middle of a chunk
+        // (CJK chars, embedded Latin runs) must render with no gap.
+        const pieces = splitCJK(word)
+        pieces.forEach((piece, pi) => {
           tokens.push({
             type: 'word',
             text: piece,
             bold: isBold,
             color,
             cjk: CJK_RE.test(piece),
+            spaceAfter: pi === pieces.length - 1,
           })
-        }
+        })
       }
       return
     }

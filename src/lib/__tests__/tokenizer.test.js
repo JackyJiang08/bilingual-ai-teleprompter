@@ -55,6 +55,16 @@ describe('tokenizeDoc', () => {
     expect(jin.cjk).toBe(true)
   })
 
+  it('marks spaceAfter only where the source had whitespace', () => {
+    const tokens = tokenizeDoc(doc([text('我们的React项目 launches')]))
+    const w = tokens.filter(t => t.type === 'word')
+    // 我/们/的/React/项 are mid-chunk → no space; 目 ends chunk 1; launches ends chunk 2
+    expect(w.map(t => t.spaceAfter)).toEqual([false, false, false, false, false, true, true])
+    // pure English: every word had whitespace after it
+    const en = tokenizeDoc(doc([text('hello world')])).filter(t => t.type === 'word')
+    expect(en.every(t => t.spaceAfter)).toBe(true)
+  })
+
   it('preserves cue markers as marker tokens, never split', () => {
     const tokens = tokenizeDoc(doc([text('breathe [PAUSE] now')]))
     expect(tokens.map(t => t.type)).toEqual(['word', 'marker', 'word', 'newline'])

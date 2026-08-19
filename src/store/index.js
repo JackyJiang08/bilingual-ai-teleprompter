@@ -13,8 +13,22 @@ export const useAppStore = create((set, get) => ({
     autoScroll: false,
     micDeviceId: 'default',
     theme: 'dark',
+    speechLang: 'en-US',
+    wordTracking: true,
   },
   setConfig: (patch) => set((s) => ({ config: { ...s.config, ...patch } })),
+
+  // Speech-tracking state (written by ReadView while reading)
+  recognition: {
+    engine: 'none',        // 'none' | 'speech' (word tracking) | 'vad' (frequency fallback)
+    status: 'idle',        // 'idle' | 'starting' | 'listening' | 'error'
+    message: '',           // human-readable status/error for the UI
+    cursorTokenIndex: -1,  // index into the token array of the next expected word
+    matchedCount: 0,       // script words already spoken
+    total: 0,              // total matchable script words
+    confidence: 0,         // recognizer confidence of the latest result (0..1)
+  },
+  setRecognition: (patch) => set((s) => ({ recognition: { ...s.recognition, ...patch } })),
 
   scripts: [],
   currentScriptIndex: -1,

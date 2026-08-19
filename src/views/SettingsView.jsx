@@ -13,6 +13,25 @@ const API = {
   quit:           () => tauriInvoke('quit_app'),
   openDevTools:   () => tauriInvoke('open_devtools'),
   hideSettings:   () => tauriInvoke('hide_settings'),
+  getSpeechStatus:() => tauriInvoke('get_speech_status'),
+  onSpeechMsg:    (cb) => tauriListen('speech-msg', (e) => cb(e.payload)),
+}
+
+const SPEECH_LANGS = [
+  { id: 'en-US', label: 'English' },
+  { id: 'zh-CN', label: '中文' },
+]
+
+function speechStatusText(v) {
+  if (!v || !v.type) return ''
+  switch (v.type) {
+    case 'ready':      return `On-device recognition active (${v.locale || ''})`
+    case 'starting':   return 'Speech engine starting…'
+    case 'error':      return v.message || 'Speech recognition error'
+    case 'terminated': return 'Speech engine stopped — voice-level fallback in use'
+    case 'stopped':    return 'Idle — starts when you begin reading'
+    default:           return ''
+  }
 }
 
 const SPEEDS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2]
@@ -34,6 +53,9 @@ export default function SettingsView() {
   const [thresholdSlider, setThresholdSlider] = useState(24)
   const [mics, setMics] = useState([{ deviceId: 'default', label: 'Default microphone' }])
   const [micId, setMicId] = useState('default')
+  const [wordTracking, setWordTracking] = useState(true)
+  const [speechLang, setSpeechLang] = useState('en-US')
+  const [speechStatus, setSpeechStatus] = useState(null)
   const [meterPct, setMeterPct] = useState(0)
   const [meterActive, setMeterActive] = useState(false)
 
@@ -64,6 +86,16 @@ export default function SettingsView() {
     startMeter()
 
     API.onConfigUpdate(applyConfig)
+
+    // Speech engine status — initial value plus live updates (state changes
+    // only; partial transcripts are not status)
+    API.getSpeechStatus().then(v => { if (v) setSpeechStatus(v) })
+    API.onSpeechMsg(v => {
+      if (!v || !v.type) return
+      if (v.type === 'partial' || v.type === 'final') return
+      if (v.type === 'error' && !v.fatal) return
+      setSpeechStatus(v)
+    })
 
     const handler = (e) => {
       if (e.metaKey && e.altKey && e.code === 'KeyI') API.openDevTools()
@@ -100,6 +132,8 @@ export default function SettingsView() {
       setThresholdSlider(thresholdToSlider(c.threshold))
     }
     if (c.micDeviceId)  setMicId(c.micDeviceId)
+    if (c.wordTracking != null) setWordTracking(!!c.wordTracking)
+    if (c.speechLang)   setSpeechLang(c.speechLang)
   }
 
   async function populateMics() {
@@ -194,6 +228,16 @@ export default function SettingsView() {
     API.setConfig({ micDeviceId: deviceId })
   }
 
+  function handleWordTracking(checked) {
+    setWordTracking(checked)
+    API.setConfig({ wordTracking: checked })
+  }
+
+  function handleSpeechLang(id) {
+    setSpeechLang(id)
+    API.setConfig({ speechLang: id })
+  }
+
   const thresholdPct = thresholdSlider + '%'
 
   return (
@@ -241,6 +285,40 @@ export default function SettingsView() {
           <Row label="Voice Input">
             <Toggle checked={voiceInput} onChange={handleVoiceInput} />
           </Row>
+
+          <Divider />
+
+          {/* Word Tracking (speech recognition) */}
+          <Row label="Word Tracking">
+            <Toggle checked={wordTracking} onChange={handleWordTracking} />
+          </Row>
+          {wordTracking && <>
+            <Row label="Language">
+              <div className="s-mode-group">
+                {SPEECH_LANGS.map(l => (
+                  <button
+                    key={l.id}
+                    className={`s-mode-btn${speechLang === l.id ? ' active' : ''}`}
+                    onClick={() => handleSpeechLang(l.id)}
+                  >{l.label}</button>
+                ))}
+              </div>
+            </Row>
+            {speechStatusText(speechStatus) && (
+              <div className="s-row">
+                <span className={`s-status${speechStatus?.type === 'error' || speechStatus?.type === 'terminated' ? ' error' : ''}`}>
+                  {speechStatusText(speechStatus)}
+                </span>
+              </div>
+            )}
+            <div className="s-row">
+              <span className="s-note">
+                Speech recognition runs entirely on-device (Apple Speech framework).
+                No audio or transcripts ever leave your Mac. If recognition is
+                unavailable, the prompter falls back to voice-level detection.
+              </span>
+            </div>
+          </>}
 
           <Divider />
 

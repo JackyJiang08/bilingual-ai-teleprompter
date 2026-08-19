@@ -41,6 +41,8 @@ export default function App() {
         threshold:   cfg.threshold   ?? 0.018,
         autoScroll:  cfg.autoScroll  ?? cfg.auto_scroll  ?? false,
         micDeviceId: cfg.micDeviceId ?? cfg.mic_device_id ?? 'default',
+        speechLang:   cfg.speechLang   ?? cfg.speech_lang   ?? 'en-US',
+        wordTracking: cfg.wordTracking ?? cfg.word_tracking ?? true,
       })
       API.setIgnoreMouse(false)
     })
@@ -53,13 +55,16 @@ export default function App() {
       if (!cfg) return
       const patch = {}
       const keys = ['mode','theme','scrollSpeed','scroll_speed','opacity','threshold',
-                    'autoScroll','auto_scroll','micDeviceId','mic_device_id','fontSize','font_size']
+                    'autoScroll','auto_scroll','micDeviceId','mic_device_id','fontSize','font_size',
+                    'speechLang','speech_lang','wordTracking','word_tracking']
       keys.forEach(k => { if (cfg[k] !== undefined) patch[k] = cfg[k] })
       // Normalise snake_case → camelCase
       if (patch.scroll_speed  !== undefined) { patch.scrollSpeed  = patch.scroll_speed;  delete patch.scroll_speed }
       if (patch.auto_scroll   !== undefined) { patch.autoScroll   = patch.auto_scroll;   delete patch.auto_scroll  }
       if (patch.mic_device_id !== undefined) { patch.micDeviceId  = patch.mic_device_id; delete patch.mic_device_id }
       if (patch.font_size     !== undefined) { patch.fontSize     = patch.font_size;     delete patch.font_size     }
+      if (patch.speech_lang   !== undefined) { patch.speechLang   = patch.speech_lang;   delete patch.speech_lang   }
+      if (patch.word_tracking !== undefined) { patch.wordTracking = patch.word_tracking; delete patch.word_tracking }
       if (Object.keys(patch).length) setConfig(patch)
     })
 

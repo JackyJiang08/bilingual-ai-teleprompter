@@ -118,11 +118,15 @@ final class Pipeline: NSObject {
             guard let self = self else { return }
             if let result = result {
                 let text = result.bestTranscription.formattedString
+                let segments = result.bestTranscription.segments
+                let confidence = segments.isEmpty
+                    ? 0.0
+                    : segments.map { Double($0.confidence) }.reduce(0, +) / Double(segments.count)
                 if result.isFinal {
-                    emit(["type": "final", "session": current, "text": text])
+                    emit(["type": "final", "session": current, "text": text, "confidence": confidence])
                     self.rotateSession()
                 } else {
-                    emit(["type": "partial", "session": current, "text": text])
+                    emit(["type": "partial", "session": current, "text": text, "confidence": confidence])
                 }
             } else if let error = error {
                 let elapsed = Date().timeIntervalSince(self.sessionStart)

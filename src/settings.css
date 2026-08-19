@@ -176,6 +176,10 @@ body {
 /* ── Divider ── */
 .s-divider { height: 1px; background: var(--s-divider); margin: 4px 0; }
 
+.s-note { font-size: 9px; line-height: 1.45; color: var(--s-muted); }
+.s-status { font-size: 9px; line-height: 1.45; color: var(--s-secondary); font-family: 'DM Mono', monospace; }
+.s-status.error { color: #f59e0b; }
+
 /* ── Author ── */
 .s-author {
   display: flex; align-items: center; justify-content: space-between;
