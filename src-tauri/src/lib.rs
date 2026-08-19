@@ -34,7 +34,16 @@ fn elevate_to_notch_level(window: &WebviewWindow) {
         // y = screenFrame.maxY - windowHeight positions top of window at screen top.
         // WKWebView renders because level=27 makes the window "visible" to compositor
         // even when fully above the menu bar.
-        if let Some(screen) = objc2_app_kit::NSScreen::mainScreen(mtm) {
+        //
+        // Display selection: prefer the screen with a physical notch
+        // (safeAreaInsets.top > 0, macOS 12+ API — minimum system is 13).
+        // Upstream used mainScreen (the screen with keyboard focus), which
+        // parks the pill on an external monitor whenever focus is there.
+        // Fallback when no notch display exists (external-only / clamshell):
+        // mainScreen, so the pill sits on the display the user is working on.
+        let screens = objc2_app_kit::NSScreen::screens(mtm);
+        let notch_screen = screens.iter().find(|s| s.safeAreaInsets().top > 0.0);
+        if let Some(screen) = notch_screen.or_else(|| objc2_app_kit::NSScreen::mainScreen(mtm)) {
             let sf = screen.frame(); // NSScreen uses bottom-left origin
             let win_h = (*ns_win).frame().size.height;
             let new_y = sf.origin.y + sf.size.height - win_h;
@@ -144,17 +153,6 @@ fn config_path() -> PathBuf {
     dirs::home_dir().unwrap_or_default().join(".teleprompter-config.json")
 }
 
-fn first_launch_path() -> PathBuf {
-    dirs::home_dir().unwrap_or_default().join(".teleprompter-launched")
-}
-
-fn is_first_launch() -> bool {
-    !first_launch_path().exists()
-}
-
-fn mark_launched() {
-    let _ = fs::write(first_launch_path(), "1");
-}
 fn scripts_path() -> PathBuf {
     dirs::home_dir().unwrap_or_default().join(".teleprompter-scripts.json")
 }
@@ -517,13 +515,6 @@ fn hide_settings(app: AppHandle) {
 #[tauri::command]
 fn open_settings(app: AppHandle) {
     show_settings(&app);
-}
-
-#[tauri::command]
-fn close_welcome(app: AppHandle) {
-    if let Some(w) = app.get_webview_window("welcome") {
-        let _ = w.close();
-    }
 }
 
 #[tauri::command]
@@ -942,7 +933,7 @@ pub fn run() {
             quit_app, open_devtools,
             hide_settings, start_drag,
             set_movable, move_window, get_window_pos,
-            close_welcome, open_url, open_settings,
+            open_url, open_settings,
             focus_prompter, elevate_notch_window,
             start_speech, stop_speech, get_speech_status,
             ai_complete, set_ai_key, has_ai_key,
@@ -966,8 +957,11 @@ pub fn run() {
 
             #[cfg(debug_assertions)]
             let prompter_url = tauri::WebviewUrl::External("http://localhost:1420".parse().unwrap());
+            // The bundled frontend is the Vite dist (index.html + settings.html);
+            // upstream pointed this at a legacy "renderer/" path that only loaded
+            // via the asset protocol's SPA fallback.
             #[cfg(not(debug_assertions))]
-            let prompter_url = tauri::WebviewUrl::App("renderer/index.html".into());
+            let prompter_url = tauri::WebviewUrl::App("index.html".into());
 
             let prompter = tauri::WebviewWindowBuilder::new(
                 app, "prompter",
@@ -997,47 +991,11 @@ pub fn run() {
                 prompter.set_content_protected(true).ok();
             }
 
-            // ── Welcome screen (first launch only) ────────
-            if is_first_launch() {
-                mark_launched();
-                let monitor  = app_handle.primary_monitor().ok().flatten();
-                let scale    = monitor.as_ref().map(|m| m.scale_factor()).unwrap_or(1.0);
-                let screen_w = monitor.as_ref().map(|m| m.size().width  as f64 / scale).unwrap_or(1440.0);
-                let screen_h = monitor.as_ref().map(|m| m.size().height as f64 / scale).unwrap_or(900.0);
-                let win_w = 460.0_f64;
-                let win_h = 600.0_f64;
-                let wx = (screen_w - win_w) / 2.0;
-                let wy = (screen_h - win_h) / 2.0;
-
-                // On Windows: use decorations (no transparent borderless) to avoid invisible window bug
-                #[cfg(target_os = "windows")]
-                let _ = tauri::WebviewWindowBuilder::new(
-                    app, "welcome",
-                    tauri::WebviewUrl::App("renderer/welcome.html".into()),
-                )
-                .title("Welcome to OpenTeleprompter")
-                .decorations(true)
-                .transparent(false)
-                .always_on_top(true)
-                .resizable(false)
-                .inner_size(win_w, win_h)
-                .position(wx, wy)
-                .build();
-
-                #[cfg(not(target_os = "windows"))]
-                let _ = tauri::WebviewWindowBuilder::new(
-                    app, "welcome",
-                    tauri::WebviewUrl::App("renderer/welcome.html".into()),
-                )
-                .title("Welcome to OpenTeleprompter")
-                .decorations(false)
-                .transparent(true)
-                .always_on_top(true)
-                .resizable(false)
-                .inner_size(win_w, win_h)
-                .position(wx, wy)
-                .build();
-            }
+            // NOTE: upstream opened a first-launch "welcome" window here. It
+            // pointed at legacy renderer assets that are not part of the
+            // bundled frontend, producing an unclosable blank/black centered
+            // window on first launch — removed in this fork. On launch, only
+            // the notch pill (and tray icon) appear.
 
             // ── Tray ───────────────────────────────────────
             let icon = tauri::image::Image::from_bytes(include_bytes!("../icons/tray-icon.png"))
@@ -1093,6 +1051,7 @@ pub fn run() {
                 Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::ArrowUp),
                 Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::ArrowDown),
                 Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyR),
+                Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyE),
             ];
             #[cfg(not(target_os = "windows"))]
             let shortcuts = vec![
@@ -1104,6 +1063,8 @@ pub fn run() {
                 Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::ArrowDown),
                 Shortcut::new(Some(Modifiers::SUPER   | Modifiers::SHIFT), Code::KeyR),
                 Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyR),
+                Shortcut::new(Some(Modifiers::SUPER   | Modifiers::SHIFT), Code::KeyE),
+                Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyE),
             ];
 
             // Register shortcuts — skip any that are already taken by the OS
@@ -1115,8 +1076,15 @@ pub fn run() {
                         Code::ArrowUp   => "faster",
                         Code::ArrowDown => "slower",
                         Code::KeyR      => "reset",
+                        Code::KeyE      => "edit", // open the script editor
                         _ => return,
                     };
+                    if action == "edit" {
+                        // Make sure the prompter is visible before opening the editor
+                        if let Some(w) = get_prompter(app) {
+                            let _ = w.show();
+                        }
+                    }
                     let _ = app.emit_to("prompter", "shortcut", action);
                 });
             }
