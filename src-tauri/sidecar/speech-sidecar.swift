@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Part of Bilingual AI Teleprompter, a fork of openTeleprompt (MIT).
 // speech-sidecar — on-device speech recognition bridge for the teleprompter.
 //
 // Runs Apple's SFSpeechRecognizer with requiresOnDeviceRecognition=true and

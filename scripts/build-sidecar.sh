@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
 # Builds the on-device speech recognition sidecar and places it where Tauri's
 # externalBin expects it: src-tauri/binaries/speech-sidecar-<target-triple>.
 # Usage: scripts/build-sidecar.sh [target-triple]
