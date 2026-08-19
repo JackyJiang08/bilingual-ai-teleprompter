@@ -403,14 +403,16 @@ body.mode-classic .idle-quit { opacity: 1; }
   color: var(--text-label);
   letter-spacing: 0.08em; text-transform: uppercase;
 }
+/* Script switcher — lives inside the header, scrolls horizontally */
 #script-list {
   display: flex;
+  align-items: center;
   flex-wrap: nowrap;
   gap: 4px;
-  padding: 0 12px 6px;
+  flex: 1;
+  min-width: 0;
   overflow-x: auto;
   overflow-y: hidden;
-  flex-shrink: 0;
   scrollbar-width: none;
   -webkit-overflow-scrolling: touch;
 }
@@ -424,6 +426,14 @@ body.mode-classic .idle-quit { opacity: 1; }
 }
 .script-item:hover { background: var(--bg-hover); }
 .script-item.active { background: var(--bg-active); }
+/* "+" tab at the end of the switcher (replaces the + New button) */
+.script-item.script-add {
+  border: none;
+  color: var(--text-secondary);
+  font-size: 12px; line-height: 1;
+  padding: 3px 8px;
+}
+.script-item.script-add:hover { color: var(--text-primary); }
 .script-name {
   font-size: 10px; color: var(--text-secondary);
   font-family: 'DM Mono', monospace;
@@ -445,11 +455,39 @@ body.mode-classic .idle-quit { opacity: 1; }
   caret-color: #818cf8;
 }
 #script-input::placeholder { color: rgba(255,255,255,0.2); }
+/* Footer: stats on the left; saved indicator + cue/format menus on the right */
+#edit-footer {
+  display: flex; align-items: center; gap: 8px;
+  padding: 4px 12px 8px 16px;
+  flex-shrink: 0;
+}
 #script-stats {
-  padding: 4px 16px 8px;
+  flex: 1;
   font-family: 'DM Mono', monospace; font-size: 10px;
   color: var(--text-muted);
-  display: flex; gap: 10px; flex-shrink: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.save-indicator {
+  font-family: 'DM Mono', monospace; font-size: 9px;
+  color: var(--text-muted);
+  opacity: 0;
+  transition: opacity 0.4s ease;
+  flex-shrink: 0;
+}
+.save-indicator.visible { opacity: 1; }
+.footer-menu-wrap { position: relative; flex-shrink: 0; }
+.footer-menu {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  right: 0;
+  display: flex; align-items: center; gap: 5px;
+  padding: 6px 8px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+  white-space: nowrap;
+  z-index: 20;
 }
 
 /* ── READ VIEW ────────────────────────────────────────────── */
@@ -623,15 +661,7 @@ body.mode-classic .idle-quit { opacity: 1; }
 .pill-btn.accent:hover { opacity: 0.85; }
 .pill-btn.icon-btn { padding: 5px 8px; display: flex; align-items: center; justify-content: center; }
 
-/* ── Tiptap toolbar ───────────────────────────────────────── */
-.tiptap-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 4px 12px;
-  border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
-}
+/* ── Format / cue controls (footer menus) ─────────────────── */
 .tb-btn {
   padding: 2px 7px;
   border-radius: 5px;

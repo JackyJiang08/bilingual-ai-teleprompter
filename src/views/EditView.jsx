@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import { TextStyle } from '@tiptap/extension-text-style'
@@ -8,13 +8,13 @@ import { API } from '../lib/api'
 import { mapAiError, preparedTextToDoc, prepareScript } from '../lib/ai'
 
 const COLORS = [
-  { label: 'White',  value: '#ffffff' },
   { label: 'Yellow', value: '#facc15' },
   { label: 'Green',  value: '#4ade80' },
   { label: 'Blue',   value: '#60a5fa' },
   { label: 'Red',    value: '#f87171' },
 ]
 const MARKERS = ['[PAUSE]', '[SLOW]', '[BREATHE]']
+const AUTOSAVE_MS = 800
 
 function computeStats(text) {
   const words = text.trim() ? text.trim().split(/\s+/).length : 0
@@ -33,10 +33,17 @@ export default function EditView() {
 
   const isClassic = config?.mode === 'classic'
   const [stats, setStats] = useState('')
+  // 'idle' → nothing shown; 'saved' → subtle indicator, cleared on next edit
+  const [saveState, setSaveState] = useState('idle')
+  // 'cue' | 'format' | null — the open footer menu
+  const [openMenu, setOpenMenu] = useState(null)
   // Prepare-with-AI state: explicit user action only, never automatic
   const [aiBusy, setAiBusy] = useState(false)
   const [aiError, setAiError] = useState('')
   const [review, setReview] = useState(null) // { originalDoc, originalText, prepared }
+
+  const autosaveTimer = useRef(null)
+  const saveRef = useRef(() => {})
 
   const editor = useEditor({
     extensions: [StarterKit, TextStyle, Color],
@@ -46,6 +53,10 @@ export default function EditView() {
     },
     onUpdate({ editor }) {
       setStats(computeStats(editor.getText()))
+      // Autosave: debounce on edit; the indicator resets while typing
+      setSaveState('idle')
+      clearTimeout(autosaveTimer.current)
+      autosaveTimer.current = setTimeout(() => saveRef.current(), AUTOSAVE_MS)
     },
   })
 
@@ -76,6 +87,7 @@ export default function EditView() {
       editor.commands.setContent(`<p>${script.text || ''}</p>`)
     }
     setStats(computeStats(script.text || ''))
+    setSaveState('idle')
   }, [editor])
 
   const saveCurrentScript = useCallback(() => {
@@ -93,7 +105,27 @@ export default function EditView() {
     }
     setScripts(updated)
     API.saveScripts(updated)
+    setSaveState('saved')
   }, [editor, scripts, currentScriptIndex])
+
+  // Keep the debounced autosave pointed at the latest save closure
+  useEffect(() => { saveRef.current = saveCurrentScript }, [saveCurrentScript])
+
+  // ⌘S: manual save trigger (autosave already covers editing)
+  useEffect(() => {
+    function onKeyDown(e) {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') {
+        e.preventDefault()
+        clearTimeout(autosaveTimer.current)
+        saveRef.current()
+      }
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('keydown', onKeyDown)
+      clearTimeout(autosaveTimer.current)
+    }
+  }, [])
 
   function handleStart() {
     if (!editor) return
@@ -115,6 +147,7 @@ export default function EditView() {
     editor?.commands.setContent('<p></p>')
     editor?.commands.focus()
     setStats('')
+    setSaveState('idle')
   }
 
   function loadScript(i) {
@@ -128,6 +161,7 @@ export default function EditView() {
       editor.commands.setContent(`<p>${script.text || ''}</p>`)
     }
     setStats(computeStats(script.text || ''))
+    setSaveState('idle')
     editor.commands.focus()
   }
 
@@ -141,6 +175,7 @@ export default function EditView() {
 
   function insertMarker(marker) {
     editor?.chain().focus().insertContent(` ${marker} `).run()
+    setOpenMenu(null)
   }
 
   // ── Prepare with AI ─────────────────────────────────────
@@ -193,6 +228,7 @@ export default function EditView() {
 
   function setColor(color) {
     editor?.chain().focus().setColor(color).run()
+    setOpenMenu(null)
   }
 
   // ── Review mode: side-by-side original vs prepared ──────
@@ -226,23 +262,9 @@ export default function EditView() {
 
   return (
     <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column' }}>
-      {/* Header */}
+      {/* Header: close · script switcher (with "+" tab) · Prepare · Go · quit */}
       <div className="edit-header">
         <button className="pill-btn ghost" onClick={handleCollapse}>✕</button>
-        <span className="view-title">Script</span>
-        <button className="pill-btn ghost" onClick={handlePrepare} disabled={aiBusy} title="Prepare for Prompter with AI">
-          {aiBusy ? 'Preparing…' : '✦ Prepare'}
-        </button>
-        <button className="pill-btn ghost" onClick={handleNew}>+ New</button>
-        <button className="pill-btn ghost" onClick={saveCurrentScript}>Save</button>
-        <button className="pill-btn accent" onClick={handleStart}>Go →</button>
-        <button className="pill-btn ghost edit-quit" onClick={() => API.quit()} title="Quit app" aria-label="Quit app">⏻</button>
-      </div>
-
-      {aiError && <div id="ai-error">{aiError}</div>}
-
-      {/* Script list */}
-      {scripts.length > 0 && (
         <div id="script-list">
           {scripts.map((s, i) => (
             <div key={i} className={`script-item${i === currentScriptIndex ? ' active' : ''}`}>
@@ -250,53 +272,76 @@ export default function EditView() {
               <button className="script-del" onClick={(e) => deleteScript(e, i)}>✕</button>
             </div>
           ))}
+          <button className="script-item script-add" onClick={handleNew} title="New script" aria-label="New script">+</button>
         </div>
-      )}
-
-      {/* Toolbar */}
-      <div className="tiptap-toolbar">
-        <button
-          className={`tb-btn${editor?.isActive('bold') ? ' active' : ''}`}
-          onMouseDown={(e) => { e.preventDefault(); editor?.chain().focus().toggleBold().run() }}
-          title="Bold"
-        ><strong>B</strong></button>
-
-        <div className="tb-divider" />
-
-        {COLORS.map((c) => (
-          <button
-            key={c.value}
-            className="tb-color"
-            style={{ background: c.value }}
-            onMouseDown={(e) => { e.preventDefault(); setColor(c.value) }}
-            title={c.label}
-          />
-        ))}
-        <button
-          className="tb-btn"
-          onMouseDown={(e) => { e.preventDefault(); editor?.chain().focus().unsetColor().run() }}
-          title="Clear color"
-        >✕</button>
-
-        <div className="tb-divider" />
-
-        {MARKERS.map((m) => (
-          <button
-            key={m}
-            className="tb-marker"
-            onMouseDown={(e) => { e.preventDefault(); insertMarker(m) }}
-            title={`Insert ${m}`}
-          >{m}</button>
-        ))}
+        <button className="pill-btn ghost" onClick={handlePrepare} disabled={aiBusy} title="Prepare for Prompter with AI">
+          {aiBusy ? 'Preparing…' : '✦ Prepare'}
+        </button>
+        <button className="pill-btn accent" onClick={handleStart}>Go →</button>
+        <button className="pill-btn ghost edit-quit" onClick={() => API.quit()} title="Quit app" aria-label="Quit app">⏻</button>
       </div>
+
+      {aiError && <div id="ai-error">{aiError}</div>}
 
       {/* Editor */}
       <div className="tiptap-wrap">
         <EditorContent editor={editor} />
       </div>
 
-      {/* Stats */}
-      <div id="script-stats">{stats}</div>
+      {/* Footer: stats · saved indicator · cue-marker menu · format menu */}
+      <div id="edit-footer">
+        <span id="script-stats">{stats}</span>
+        <span className={`save-indicator${saveState === 'saved' ? ' visible' : ''}`} aria-live="polite">Saved</span>
+
+        <div className="footer-menu-wrap">
+          <button
+            className={`tb-btn${openMenu === 'cue' ? ' active' : ''}`}
+            onMouseDown={(e) => { e.preventDefault(); setOpenMenu(openMenu === 'cue' ? null : 'cue') }}
+            title="Insert cue marker"
+          >+ Cue</button>
+          {openMenu === 'cue' && (
+            <div className="footer-menu" role="menu">
+              {MARKERS.map((m) => (
+                <button key={m} className="tb-marker" onMouseDown={(e) => { e.preventDefault(); insertMarker(m) }}>
+                  {m}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="footer-menu-wrap">
+          <button
+            className={`tb-btn${openMenu === 'format' ? ' active' : ''}`}
+            onMouseDown={(e) => { e.preventDefault(); setOpenMenu(openMenu === 'format' ? null : 'format') }}
+            title="Text format"
+          >⋯</button>
+          {openMenu === 'format' && (
+            <div className="footer-menu" role="menu">
+              <button
+                className={`tb-btn${editor?.isActive('bold') ? ' active' : ''}`}
+                onMouseDown={(e) => { e.preventDefault(); editor?.chain().focus().toggleBold().run() }}
+                title="Bold (⌘B)"
+              ><strong>B</strong></button>
+              <div className="tb-divider" />
+              {COLORS.map((c) => (
+                <button
+                  key={c.value}
+                  className="tb-color"
+                  style={{ background: c.value }}
+                  onMouseDown={(e) => { e.preventDefault(); setColor(c.value) }}
+                  title={c.label}
+                />
+              ))}
+              <button
+                className="tb-btn"
+                onMouseDown={(e) => { e.preventDefault(); editor?.chain().focus().unsetColor().run(); setOpenMenu(null) }}
+                title="Default color"
+              >✕</button>
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   )
 }

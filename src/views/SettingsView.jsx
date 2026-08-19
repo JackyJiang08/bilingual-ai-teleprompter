@@ -494,6 +494,8 @@ export default function SettingsView() {
           <Shortcut label="Pause / Resume"   keys="⌘⇧Space" />
           <Shortcut label="Speed Up / Down"  keys="⌘⇧↑↓" />
           <Shortcut label="Reset to Top"     keys="⌘⇧R" />
+          <Shortcut label="Open Editor"      keys="⌘⇧E" />
+          <Shortcut label="Save Script"      keys="⌘S" />
         </>}
 
         <Divider />
