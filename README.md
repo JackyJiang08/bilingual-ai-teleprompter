@@ -12,7 +12,7 @@ This project is based on [openTeleprompt](https://github.com/ArunNGun/openTelepr
 
 This fork extends the original project with:
 
-- **Chinese / bilingual speech tracking** — voice-activated scrolling that follows Mandarin and mixed Chinese–English delivery, not just English speech (planned; in development)
+- **Word-level speech tracking (English + Mandarin)** — on-device speech recognition follows your actual reading position: spoken text dims, the current word is highlighted, and the scroll is driven by where you are in the script, broadcast-teleprompter style. Mixed Chinese–English scripts are handled. See [Word Tracking](#word-tracking-this-fork).
 - **AI script preprocessing** — automatic script cleanup, segmentation, and cue-marker insertion before a session (planned; in development)
 
 See [NOTICE](NOTICE) for license and provenance details. Upstream repository: https://github.com/ArunNGun/openTeleprompt
@@ -68,6 +68,20 @@ Clean React settings view with auto-height. All preferences in one place, persis
 - ⚡ **Live controls** — speed + font size adjustable while reading
 - 🌫️ **Opacity control** — barely-there to solid
 - ⌨️ **Global shortcuts** — ⌘⇧Space, ⌘⇧↑↓, ⌘⇧R
+
+---
+
+## Word Tracking (this fork)
+
+Instead of scrolling at a fixed speed whenever it hears sound, the prompter can recognize **what** you say and follow your reading position word by word:
+
+- **Highlights your current word** (accent underline) and **dims what you've already spoken**; upcoming text stays at full brightness.
+- **Scroll follows you** — the current word is eased toward a reading line at ~35% of the viewport. Speed up, slow down, skip a phrase, or stumble: the cursor tolerates skipped words, fillers, and misreads, and never jumps backward.
+- **English and Mandarin** — pick the language in Settings → Word Tracking (English / 中文). Chinese scripts are tracked per character, so no spaces are needed; mixed Chinese–English scripts work, including Latin words embedded in Chinese text (e.g. 我们的React项目).
+- **100% on-device** — recognition uses Apple's Speech framework with `requiresOnDeviceRecognition`. No audio or transcripts ever leave your Mac. macOS will ask once for Speech Recognition permission (plus the existing microphone permission).
+- **Graceful fallback** — if Speech permission is denied or the on-device model for the selected language isn't installed (System Settings › Keyboard › Dictation), the app falls back to the original frequency-based voice activation and says so in Settings. You can also turn Word Tracking off entirely.
+
+Under the hood: a small Swift sidecar streams on-device partial transcripts to the app, and a forward-searching matcher aligns them against the tokenized script. Details in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) §3.1.
 
 ---
 
@@ -134,7 +148,7 @@ npm run build
 npm run build:win
 ```
 
-**Requirements:** Rust + Cargo, Node.js 18+
+**Requirements:** Rust + Cargo, Node.js 18+, Swift toolchain (Xcode Command Line Tools) for the speech sidecar — built automatically by `npm run build:sidecar` (invoked from `beforeDevCommand`/`beforeBuildCommand`). Unit tests for the tokenizer/matcher: `npm test`.
 
 ---
 

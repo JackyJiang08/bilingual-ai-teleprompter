@@ -1,6 +1,6 @@
 # Architecture
 
-Technical architecture of this codebase (upstream: [openTeleprompt](https://github.com/ArunNGun/openTeleprompt) v3.0.0). A Tauri v2 desktop app: Rust backend, React 19 + Vite frontend, Zustand state, Tiptap rich-text editing. All file/line references are to this repository at the fork point.
+Technical architecture of this codebase (upstream: [openTeleprompt](https://github.com/ArunNGun/openTeleprompt) v3.0.0, extended in this fork with on-device word-level speech tracking — §3.1). A Tauri v2 desktop app: Rust backend, React 19 + Vite frontend, Zustand state, Tiptap rich-text editing, plus a Swift speech-recognition sidecar. `file:line` references date from the fork-point audit; in files this fork has since modified (`lib.rs`, `ReadView.jsx`, `tokenizer.js`, settings) they may be offset — treat them as anchors, not exact coordinates.
 
 > **Scope note.** `frontend/renderer/` is the legacy Electron v1.x renderer (plain JS, `frontend/renderer/app.js`). It is still referenced by the Rust backend for the Windows settings panel and the first-launch welcome window (see §1.4), but the active macOS app is the React frontend in `src/`. `docs/` (other than this file) is the GitHub Pages landing site.
 
@@ -18,7 +18,9 @@ There is one Rust process and up to three WebView windows, each identified by a 
 | `settings` | React settings panel (`settings.html` → `src/settings-main.jsx` → `src/views/SettingsView.jsx`) | lazily by `show_settings()` at `lib.rs:601-631` on tray click |
 | `welcome` | Legacy static page `frontend/renderer/welcome.html` | first launch only, `lib.rs:722-761` |
 
-Entry point: `src-tauri/src/main.rs:4-6` calls `open_teleprompter_lib::run()` (`lib.rs:646-858`), which registers three plugins — `tauri_plugin_global_shortcut`, `tauri_plugin_fs`, `tauri_plugin_positioner` (`lib.rs:656-658`) — installs `AppState`, registers 21 commands (`lib.rs:660-670`), and builds the tray + global shortcuts in `setup()`.
+In addition to the windows there is one supervised child process: **`speech-sidecar`**, a Swift binary (source `src-tauri/sidecar/speech-sidecar.swift`, bundled via `externalBin` in `tauri.conf.json`) that runs Apple's `SFSpeechRecognizer` fully on-device and streams partial transcripts to the app — see §3.1.
+
+Entry point: `src-tauri/src/main.rs:4-6` calls `open_teleprompter_lib::run()`, which registers four plugins — `tauri_plugin_global_shortcut`, `tauri_plugin_fs`, `tauri_plugin_shell`, `tauri_plugin_positioner` — installs `AppState`, registers 24 commands, and builds the tray + global shortcuts in `setup()`.
 
 The two React windows are separate Vite entry points, declared in `vite.config.js:14-17` (`rollupOptions.input: { main: 'index.html', settings: 'settings.html' }`). They do **not** share JS state; they synchronize only through the Rust backend (see §1.3).
 
@@ -31,10 +33,11 @@ The two React windows are separate Vite entry points, declared in `vite.config.j
 
 Direction of traffic:
 
-- **JS → Rust (commands):** the 21 handlers in `lib.rs:660-670` (`get_config`, `set_config`, `switch_mode`, `get_scripts`, `save_scripts`, `set_ignore_mouse`, `resize_prompter`, `toggle_prompter`, `resize_settings`, `quit_app`, `open_devtools`, `hide_settings`, `start_drag`, `set_movable`, `move_window`, `get_window_pos`, `close_welcome`, `open_url`, `open_settings`, `focus_prompter`, `elevate_notch_window`).
-- **Rust → JS (events):** exactly two event names.
-  - `config-update` — broadcast by `set_config` (`lib.rs:305`); consumed by `App.jsx:52-64` (which normalizes snake_case→camelCase) and `SettingsView.jsx:66`.
-  - `shortcut` — emitted to the `prompter` window with a string payload `"pause" | "faster" | "slower" | "reset"` from the global-shortcut handler (`lib.rs:832-842`), and `"stop"` from `switch_mode` (`lib.rs:316`) and `toggle_prompter` (`lib.rs:399`); consumed in `ReadView.jsx:152-161`.
+- **JS → Rust (commands):** the 24 handlers registered in `run()` (`get_config`, `set_config`, `switch_mode`, `get_scripts`, `save_scripts`, `set_ignore_mouse`, `resize_prompter`, `toggle_prompter`, `resize_settings`, `quit_app`, `open_devtools`, `hide_settings`, `start_drag`, `set_movable`, `move_window`, `get_window_pos`, `close_welcome`, `open_url`, `open_settings`, `focus_prompter`, `elevate_notch_window`, `start_speech`, `stop_speech`, `get_speech_status`).
+- **Rust → JS (events):** three event names.
+  - `config-update` — broadcast by `set_config`; consumed by `App.jsx` (which normalizes snake_case→camelCase) and `SettingsView.jsx`.
+  - `shortcut` — emitted to the `prompter` window with a string payload `"pause" | "faster" | "slower" | "reset"` from the global-shortcut handler, and `"stop"` from `switch_mode` and `toggle_prompter`; consumed in `ReadView.jsx`.
+  - `speech-msg` — broadcast to all windows: every NDJSON line from the speech sidecar plus a synthetic `{"type":"terminated"}` on process exit (see §3.1). Consumed by `src/lib/speech.js` (tracking) and `SettingsView.jsx` (status display).
 
 Permissions for the WebView side are scoped in `src-tauri/capabilities/default.json` to the `prompter` and `settings` windows (core window ops, `global-shortcut:*`, `fs:*`, `positioner:*`).
 
@@ -42,11 +45,11 @@ Permissions for the WebView side are scoped in `src-tauri/capabilities/default.j
 
 Three state stores, with the Rust side as source of truth for anything persistent:
 
-1. **Rust `AppState`** (`lib.rs:116-120`): `Mutex<Config>` + `Mutex<Option<(f64,f64)>>` (last classic-mode window position). `Config` (`lib.rs:72-104`) holds `scroll_speed`, `threshold`, `screenshare_hidden`, `mode`, `opacity`, `auto_scroll`, `mic_device_id`, `theme`; serialized camelCase.
+1. **Rust `AppState`**: `Mutex<Config>`, `Mutex<Option<(f64,f64)>>` (last classic-mode window position), plus the speech sidecar's `CommandChild` handle and last status value. `Config` holds `scroll_speed`, `threshold`, `screenshare_hidden`, `mode`, `opacity`, `auto_scroll`, `mic_device_id`, `theme`, `speech_lang`, `word_tracking`; serialized camelCase (the two new fields carry `#[serde(default)]`s so pre-existing config files still parse).
 2. **Disk**: three dotfiles in the user's home directory (`lib.rs:123-139`): `~/.teleprompter-config.json`, `~/.teleprompter-scripts.json`, `~/.teleprompter-launched` (first-launch marker). Writes happen in `save_config` (`lib.rs:147-151`) and `save_scripts_to_disk` (`lib.rs:251-255`).
-3. **Zustand store** (`src/store/index.js`): a single `useAppStore` with `view` (`'idle' | 'edit' | 'read'`), a `config` mirror, `scripts` + `currentScriptIndex`, the active script (`scriptText` plain text, `scriptDoc` Tiptap JSON), and playback flags.
+3. **Zustand store** (`src/store/index.js`): a single `useAppStore` with `view` (`'idle' | 'edit' | 'read'`), a `config` mirror, `scripts` + `currentScriptIndex`, the active script (`scriptText` plain text, `scriptDoc` Tiptap JSON), playback flags, and `recognition` — the speech-tracking state written by ReadView while reading (`engine: 'none'|'speech'|'vad'`, `status`, `message`, `cursorTokenIndex`, `matchedCount`, `total`, `confidence`).
 
-**Caveat (verified):** the playback flags in the store (`isSpeaking`, `isPaused`, `isHoverPaused`, `isRunning`, `speedIndex`, `store/index.js:29-39`) are written by nothing — `ReadView.jsx:16-17` shadows them with local `useState`, and all `setIsSpeaking`/`setIsPaused` calls in `ReadView` are those local setters. `IdleView.jsx:4` reads the store's `isSpeaking`/`isPaused`, which therefore remain at their initial `false`. Treat the store flags as dead code inherited from a refactor; real playback state lives in `ReadView` local state + refs (§3.3).
+**Caveat (verified):** the playback flags in the store (`isSpeaking`, `isPaused`, `isHoverPaused`, `isRunning`, `speedIndex`, `store/index.js:29-39`) are written by nothing — `ReadView.jsx:16-17` shadows them with local `useState`, and all `setIsSpeaking`/`setIsPaused` calls in `ReadView` are those local setters. `IdleView.jsx:4` reads the store's `isSpeaking`/`isPaused`, which therefore remain at their initial `false`. Treat the store flags as dead code inherited from a refactor; real playback state lives in `ReadView` local state + refs (§3.2.3). The newer `recognition` slice IS live — ReadView writes it while reading.
 
 ### 1.4 Known upstream quirks (relevant when extending)
 
@@ -54,7 +57,7 @@ Documented here because they affect where new code can safely go; none were chan
 
 - `setup()` builds the initial prompter window with release URL `renderer/index.html` (`lib.rs:691`), while `create_prompter_window()` uses `index.html` (`lib.rs:541`). The Vite build (`frontendDist: "../dist"`, `tauri.conf.json:10`) emits only `index.html` and `settings.html`; nothing copies `frontend/renderer/` into `dist/`, so the `renderer/*` App URLs (initial prompter, `welcome`, Windows settings at `lib.rs:603`) point at paths absent from the bundled frontend.
 - `src/lib/api.js:5` — `elevateNotchWindow` calls a bare `invoke` (undefined identifier; would throw if invoked). Nothing calls it: notch elevation actually happens Rust-side (§2.2). The `elevate_notch_window` command (`lib.rs:267-279`) is effectively unreachable from JS as wired.
-- `src-tauri/Cargo.toml:23-33`: `serde`, `serde_json`, `dirs`, `open` and all three Tauri plugins are declared under `[target.'cfg(target_os = "macos")'.dependencies]`, so the crate as committed only builds on macOS (consistent with the README's "Windows v3 coming soon").
+- `src-tauri/Cargo.toml:23-33`: `serde`, `serde_json`, `dirs`, `open` and all four Tauri plugins are declared under `[target.'cfg(target_os = "macos")'.dependencies]`, so the crate as committed only builds on macOS (consistent with the README's "Windows v3 coming soon").
 
 ---
 
@@ -97,15 +100,40 @@ Called from `setup()` (`lib.rs:713-715`) and from `create_prompter_window()` (`l
 
 ---
 
-## 3. Voice-activation pipeline (current, frequency-only)
+## 3. Reading-position pipelines
 
-There is **no speech recognition anywhere in the current code**. "Voice activation" is an energy heuristic that answers one boolean per frame: *is the user speaking?* Scrolling is constant-speed while that boolean is true — it is not aligned to what was said.
+Two pipelines can drive the prompter while reading:
 
-### 3.1 Capture
+1. **Word-level speech tracking** (§3.1, default) — on-device speech recognition aligns what you say against the script; the scroll offset follows your actual reading position, spoken text dims, and the current word is highlighted.
+2. **Frequency-based voice activation** (§3.2, fallback) — the original upstream energy heuristic: constant-speed scroll while a per-frame "is the user speaking?" boolean is true. Used when word tracking is disabled in settings, when running outside Tauri (browser dev), or when recognition is unavailable (see degradation rules below).
+
+### 3.1 Word-level speech tracking (speech sidecar)
+
+**Process.** `src-tauri/sidecar/speech-sidecar.swift` is a standalone Swift binary compiled by `scripts/build-sidecar.sh` into `src-tauri/binaries/speech-sidecar-<target-triple>` (gitignored; built automatically by `beforeDevCommand`/`beforeBuildCommand`) and bundled through `externalBin`. It runs `SFSpeechRecognizer` with `requiresOnDeviceRecognition = true`, `shouldReportPartialResults = true`, `taskHint = .dictation`, and `addsPunctuation = false`, fed by an `AVAudioEngine` input tap. **All recognition is on-device; nothing leaves the machine** — the binary's only output channel is NDJSON on stdout to the parent app. It refuses to run at all (fatal `ondevice_unsupported`) if the selected locale's on-device model is missing.
+
+**Protocol** (one JSON object per stdout line): `ready {locale, onDevice}`, `partial`/`final {session, text, confidence}` (confidence = mean of `SFTranscriptionSegment` confidences), and `error {code, message, fatal}`. Recognition tasks are rotated on final results and recoverable errors — each rotation increments `session`, and each session's transcript starts empty. Fatal codes: `auth_denied`, `auth_restricted`, `locale_unavailable`, `ondevice_unsupported`, `audio_error`, `recognizer_storm` (three failures within 2 s of session start).
+
+**Supervision (Rust).** `start_speech(locale)` in `src-tauri/src/lib.rs` kills any previous instance, spawns the sidecar via `tauri_plugin_shell`'s `sidecar()`, and pumps its stdout: every parsed line is broadcast to all windows as a `speech-msg` event; `ready`/`error` lines are also stored in `AppState.speech_status` so the settings window can query the latest state via `get_speech_status` after the fact. Process exit surfaces as a synthetic `{"type":"terminated","code"}` message. `stop_speech` kills the child; the `RunEvent::Exit` handler guarantees the sidecar never outlives the app. Rust makes no policy decisions — restart and fallback logic live in the frontend.
+
+**Matching (JS).** `src/lib/matcher.js` implements the forward-searching cursor:
+
+- Script tokens come from `tokenizeDoc` (`src/lib/tokenizer.js`), which splits whitespace-delimited chunks and then breaks CJK ideograph runs into one token per character (`cjk: true`, `splitCJK`) — Mandarin is matched character-by-character, embedded Latin runs ("我们的React项目") stay whole, and `spaceAfter` records where the source actually had whitespace so rendering doesn't invent gaps.
+- Transcript text is tokenized the same way (`tokenizeTranscript`), and both sides are normalized by `normalizeWord`: NFKC fold (full-width → half-width), lowercase, strip all non-letter/non-digit characters in any script.
+- `createCursorMatcher(tokens)` keeps a **monotonic** cursor over the matchable word tokens. Each new transcript word is searched in a lookahead window (default 12 words) starting at the cursor; a hit advances the cursor past it (absorbing skipped script words), a miss is dropped (fillers like "um"/"嗯", misreads). Partials that revise already-consumed words are ignored via longest-common-prefix diffing, and session rotation resets transcript state without moving the cursor. The window bound also prevents a stray common word ("the", "的") from teleporting the cursor. Unit tests: `src/lib/__tests__/matcher.test.js` and `tokenizer.test.js` (`npm test`).
+
+**Frontend wiring.** `src/lib/speech.js` (`createSpeechTracker`) subscribes to `speech-msg`, feeds partials into the matcher, and owns policy: up to 2 restarts on unexpected termination, then fallback; fatal error codes map to user-facing messages (`fallbackMessageFor`). `ReadView.jsx` starts the tracker on mount when `config.wordTracking` is on, mirrors every update into the Zustand `recognition` state, and renders word tokens with per-token refs and classes — `tok-spoken` (opacity 0.35) for tokens behind the cursor, `tok-current` (accent underline) for the next expected word, full brightness ahead (`src/style.css`). The RAF loop's tracking branch eases the scroll offset toward `currentWordEl.offsetTop − 0.35 × viewportHeight` with exponential smoothing (`FOLLOW_SMOOTHING`), so the reading line sits at ~35% of the viewport and the scroll speed is entirely driven by the reader. Cue markers, hover-pause, manual wheel scrubbing, and the `[PAUSE]`/`[BREATHE]`/`[SLOW]` behaviors are unchanged.
+
+**Degradation.** Any fatal sidecar error or restart exhaustion calls the tracker's `onFallback`: ReadView clears tracking state, starts the legacy VAD engine (§3.2), and the settings window shows the reason (its status line listens to `speech-msg` and initializes from `get_speech_status`). Word tracking can also be disabled outright with the settings toggle. Permissions: `NSMicrophoneUsageDescription` (upstream) plus `NSSpeechRecognitionUsageDescription` (this fork) in `src-tauri/Info.plist`; the sidecar child process inherits the app's TCC attribution.
+
+### 3.2 Frequency-based voice activation (fallback)
+
+The original upstream pipeline. It performs no speech recognition — an energy heuristic answers one boolean per frame: *is the user speaking?* Scrolling is constant-speed while that boolean is true.
+
+#### 3.2.1 Capture
 
 Audio is captured **in the prompter WebView**, not in Rust, via `navigator.mediaDevices.getUserMedia` (`src/lib/mic.js:52`) with `echoCancellation`, `noiseSuppression`, `autoGainControl`, `suppressLocalAudioPlayback` (`mic.js:41-46`) and an optional exact `deviceId` from `config.micDeviceId` (with `OverconstrainedError` fallback, `mic.js:53-58`). OS permission is granted through `NSMicrophoneUsageDescription` (`src-tauri/Info.plist`) and the `com.apple.security.(device.)audio-input` entitlements (`src-tauri/entitlements.plist`); `App.jsx:66-69` pre-probes permission on mount. The settings window opens its own independent stream for the level meter (`SettingsView.jsx:118-139`).
 
-### 3.2 Detection — `createMicEngine` (`src/lib/mic.js:8-110`)
+#### 3.2.2 Detection — `createMicEngine` (`src/lib/mic.js:8-110`)
 
 Factory returning `{ start(micDeviceId), stop(), setThreshold(v) }`. Inside `start()`:
 
@@ -115,19 +143,19 @@ Factory returning `{ start(micDeviceId), stop(), setThreshold(v) }`. Inside `sta
 - **Hysteresis:** a frame counter increments +1 on pass, decrements −2 on fail, clamped to `[0, 8]`; speech is asserted only at `VOICE_FRAMES_REQUIRED = 8` consecutive-ish frames (`mic.js:6`, `mic.js:34-37`), i.e. ~130 ms of sustained voice.
 - **Debounce down:** on the first non-speech frame while speaking, a 400 ms timer (`SILENCE_DELAY_MS`, `mic.js:5`) fires `onSilence`; any speech frame cancels it. `onSpeaking` fires on the rising edge.
 
-### 3.3 Where scroll state lives
+#### 3.2.3 Where scroll state lives
 
-The engine is instantiated in `ReadView`'s mount effect (`src/views/ReadView.jsx:141-148`); its callbacks set **local** state/refs: `isSpeakingRef` + `useState isSpeaking` + `micStatus` (`ReadView.jsx:143-144`). A mic-device change tears down and recreates the engine (`ReadView.jsx:59-69`); threshold changes are pushed live via `setThreshold` (`ReadView.jsx:57`).
+The VAD engine is started by `ReadView`'s `startVadEngine()` (on mount when word tracking is off/unavailable, or later via fallback); its callbacks set **local** state/refs: `isSpeakingRef` + `useState isSpeaking` + `micStatus`. A mic-device change tears down and recreates the engine; threshold changes are pushed live via `setThreshold`.
 
-The scroll loop is a `requestAnimationFrame` loop (`ReadView.jsx:118-138`):
+Both pipelines share one `requestAnimationFrame` loop in `ReadView` with two branches. The legacy branch:
 
 ```
-shouldScroll = config.autoScroll ? !paused : (isSpeakingRef.current && !paused)
+shouldScroll = config.autoScroll ? true : isSpeakingRef.current   // (outer guard: not paused)
 scrollPosRef.current += SCROLL_SPEED_BASE(0.1) * SPEEDS[speedIdx] * frameDelta
 scriptTextRef.current.style.transform = translateY(-scrollPos)
 ```
 
-with `paused = isPausedRef || isHoverPausedRef`. Scroll position is a ref (`scrollPosRef`), applied as a CSS transform — it never touches React state or the Zustand store. As noted in §1.3, the Zustand playback flags are dead; Zustand's real responsibilities in read mode are only `scriptText`/`scriptDoc` (input) and `setView` (exit). Cue markers (`[PAUSE]`, `[BREATHE]`, `[SLOW]`) fire when their DOM element enters the top 40 % of the viewport (`checkMarkers`, `ReadView.jsx:75-115`), driving timed pauses or a speed step-down. Manual wheel scrubbing writes the same `scrollPosRef` (`ReadView.jsx:203-209`).
+with `paused = isPausedRef || isHoverPausedRef` gating both branches. Scroll position is a ref (`scrollPosRef`), applied as a CSS transform — it never touches React state or the Zustand store (the `recognition` slice is updated from speech-tracking callbacks, not from the RAF loop). As noted in §1.3, the older Zustand playback flags are dead; Zustand's real responsibilities in read mode are `scriptText`/`scriptDoc` (input), `recognition` (output for other views), and `setView` (exit). Cue markers (`[PAUSE]`, `[BREATHE]`, `[SLOW]`) fire when their DOM element enters the top 40 % of the viewport (`checkMarkers`), driving timed pauses or a speed step-down. Manual wheel scrubbing writes the same `scrollPosRef`.
 
 ---
 
@@ -147,7 +175,7 @@ Whole-array read/write through two commands: `get_scripts` → `load_scripts()` 
 - Save: `saveCurrentScript` (`EditView.jsx:60-75`) derives `name` from the first line (≤ 40 chars), `text` from `editor.getText()`, `content` from `JSON.stringify(editor.getJSON())`, updates the array in Zustand, and calls `API.saveScripts` (write-through).
 - Load: `loadScript(i)` / mount effect parse `script.content` back into the editor, falling back to wrapping `script.text` in a paragraph on parse failure (`EditView.jsx:48-58`, `99-111`).
 - Handoff to the prompter: `handleStart` (`EditView.jsx:77-85`) saves, then `setScriptText(text)` + `setScriptDoc(editor.getJSON())` + `setView('read')`.
-- Rendering for reading: `tokenizeDoc` (`src/lib/tokenizer.js:6-42`) walks the Tiptap JSON and flattens it to tokens `{ type: 'word'|'marker'|'newline', text, bold, color, marker }`. Words are produced by `text.split(/(\s+)/)` (`tokenizer.js:18`) — **whitespace segmentation**, which is the key limitation for Chinese text (§7a). `ReadView.jsx:235-258` renders one `<span>` per token; word-count stats assume `\s+`-separated words at 130 WPM (`EditView.jsx:18-24`).
+- Rendering for reading: `tokenizeDoc` (`src/lib/tokenizer.js`) walks the Tiptap JSON and flattens it to tokens `{ type: 'word'|'marker'|'newline', text, bold, color, marker, cjk, spaceAfter }`. Chunks are split on whitespace, then CJK ideograph runs are split per character (see §3.1); `spaceAfter` preserves original spacing for display. `ReadView` renders one `<span>` per token (with speech-tracking classes, §3.1). Word-count stats still assume `\s+`-separated words at 130 WPM (`EditView.jsx:18-24`), so the estimate is rough for Chinese scripts.
 
 ---
 
@@ -161,6 +189,7 @@ Whole-array read/write through two commands: `get_scripts` → `load_scripts()` 
 - Voice sensitivity: a log-scale slider mapping `0.003–0.562` RMS (`sliderToThreshold`, `SettingsView.jsx:19-22`), displayed in dB, with a live RMS meter from its own mic stream (`startMeter`, `SettingsView.jsx:118-139`).
 - Mode switching calls the dedicated `switch_mode` command (not `set_config`) because the prompter window must be destroyed and recreated (`SettingsView.jsx:154-157`, `lib.rs:309-333`).
 - Mic enumeration via `enumerateDevices` after a temporary permission-priming stream (`SettingsView.jsx:105-116`).
+- Word tracking (this fork): a "Word Tracking" toggle (`wordTracking`) and an English/中文 selector (`speechLang: 'en-US' | 'zh-CN'`), plus a live status line driven by `get_speech_status` + `speech-msg` events and an on-device privacy note. A language change takes effect at the start of the next reading session (the sidecar takes its locale at spawn).
 
 ### 5.2 Global shortcuts
 
@@ -178,40 +207,44 @@ index.html ─→ src/main.jsx ─→ src/App.jsx
               ┌────────────────┼──────────────────┐
               ▼                ▼                  ▼
       views/IdleView.jsx  views/EditView.jsx  views/ReadView.jsx
-        store: view,        store: scripts,     store: scriptText/Doc,
-        isSpeaking*,        currentScriptIndex, config, setView
+        store: view,        store: scripts,     store: scriptText/Doc, config,
+        isSpeaking*,        currentScriptIndex, setView, setRecognition
         isPaused*, config   scriptText/Doc,     lib/tokenizer.js (doc→tokens)
-        (*never updated)    config              lib/mic.js (VAD engine)
-              │                │                lib/api.js (shortcuts, resize)
+        (*never updated)    config              lib/speech.js (word tracker)
+              │                │                  └─ lib/matcher.js (cursor)
+              │                │                lib/mic.js (VAD fallback)
+              │                │                lib/api.js (shortcuts, resize,
+              │                │                            start/stop_speech)
               │                ├─ @tiptap/react + starter-kit
               │                │  + extension-text-style + extension-color
               └────────┬───────┴──────────┬─────┘
                        ▼                  ▼
               src/store/index.js   src/lib/api.js ──→ window.__TAURI__ ──→ src-tauri/src/lib.rs
-              (Zustand useAppStore)                    (invoke/listen)
+              (Zustand useAppStore)                    (invoke/listen)          │
+                                                                                ▼ (spawn, stdout)
+                                                             speech-sidecar (Swift, SFSpeechRecognizer)
 
 settings.html ─→ src/settings-main.jsx ─→ src/views/SettingsView.jsx
-                 (separate window & bundle; inline API copy at SettingsView.jsx:6-16;
-                  no Zustand — local useState only; syncs via config-update event)
+                 (separate window & bundle; inline API copy at SettingsView.jsx top;
+                  no Zustand — local useState only; syncs via config-update and
+                  speech-msg events)
 ```
 
-Shared modules: `store/index.js` (all three prompter views + App), `lib/api.js` (App, EditView, ReadView — **not** SettingsView), `lib/mic.js` and `lib/tokenizer.js` (ReadView only). Styling: `src/style.css` (prompter), `src/settings.css` (settings).
+Shared modules: `store/index.js` (all three prompter views + App), `lib/api.js` (App, EditView, ReadView, lib/speech.js — **not** SettingsView), `lib/mic.js`, `lib/speech.js`, `lib/matcher.js`, and `lib/tokenizer.js` (ReadView only; matcher/tokenizer also unit-tested in `src/lib/__tests__/`). Styling: `src/style.css` (prompter), `src/settings.css` (settings).
 
 ---
 
 ## 7. Extension points
 
-### 7a. Speech-recognition-driven word tracker (replacing frequency-only detection)
+### 7a. Speech-recognition-driven word tracker — **implemented**
 
-The current design conveniently isolates everything you need behind three seams:
+This fork implemented the word tracker along the three seams identified here; the full pipeline is documented in §3.1. Where the pieces landed:
 
-1. **The engine seam — `createMicEngine` in `src/lib/mic.js:8`.** ReadView interacts with the engine only through the factory's contract: construction with `{ threshold, onSpeaking, onSilence, onError }` and the returned `{ start(micDeviceId), stop(), setThreshold(v) }` (call sites: `ReadView.jsx:141-148` on mount, `ReadView.jsx:59-69` on device change, `ReadView.jsx:166` cleanup). A recognizer-based engine (e.g. Web Speech API, or a Rust-side Whisper/`SFSpeechRecognizer` streaming words over a Tauri event) can implement the same surface plus a new callback such as `onWordMatched(tokenIndex)`. Keep the existing RMS/band gate as a cheap front-end VAD if desired — `isVoiceFrequency` (`mic.js:17-38`) is self-contained.
+1. **Engine seam** → `src/lib/speech.js` (`createSpeechTracker`), a sibling of `createMicEngine` that streams sidecar transcripts into the matcher and owns restart/fallback policy. The RMS/band VAD (`src/lib/mic.js`) was kept intact as the fallback engine.
+2. **Scroll-application seam** → the RAF loop in `ReadView.jsx` gained a tracking branch: per-word refs (`wordRefs`) give token→DOM geometry, and the scroll offset eases toward the current word's `offsetTop` at the 35% reading line.
+3. **Token seam** → `tokenizeDoc` splits CJK runs per character (with `cjk`/`spaceAfter` flags) instead of `Intl.Segmenter` word segmentation — per-character matching proved simpler and more robust for cursor tracking; `src/lib/matcher.js` handles normalization and transcript alignment. Still open: the 130-WPM stat in `EditView.jsx:18-24` remains whitespace-based.
 
-2. **The scroll-application seam — the RAF loop in `src/views/ReadView.jsx:118-138`.** All scrolling reduces to writing `scrollPosRef.current` and setting `transform: translateY(...)` on `scriptTextRef` (the wheel handler at `ReadView.jsx:203-209` and reset at `187-191` are the other writers). A word tracker replaces the constant-speed increment (`ReadView.jsx:127`) with position control: compute a target offset from the matched token's DOM position and ease `scrollPosRef` toward it. The mechanism for mapping token index → DOM element already exists for cue markers: per-token refs collected into `markerRefs.current[i]` (`ReadView.jsx:240`) and measured with `getBoundingClientRect()` against the viewport (`checkMarkers`, `ReadView.jsx:75-86`). Extend that ref-collection to word tokens (rendered at `ReadView.jsx:247-257`) and the geometry problem is solved.
-
-3. **The token seam — `tokenizeDoc` in `src/lib/tokenizer.js:6-42`.** The recognizer must align transcript words against the same token list ReadView renders (`const tokens = tokenizeDoc(scriptDoc)`, `ReadView.jsx:9`). Two required changes for Chinese/bilingual scripts: (i) word splitting is `text.split(/(\s+)/)` (`tokenizer.js:18`), which yields one giant "word" for unsegmented Chinese — swap in `Intl.Segmenter('zh', { granularity: 'word' })` or an equivalent segmenter, per-run by script detection for mixed text; (ii) the 130-WPM stat in `EditView.jsx:18-24` shares the same whitespace assumption.
-
-   Supporting plumbing if the recognizer needs configuration or runs natively: add fields to `Config` (`lib.rs:74-83`) + the patch matcher in `set_config` (`lib.rs:289-296`) + store defaults (`store/index.js:7-16`) + a control in `SettingsView.jsx`; register any new Rust command in `invoke_handler` (`lib.rs:660-670`) and add a wrapper in `src/lib/api.js`. Rust→JS streaming should follow the existing event pattern (`emit_to("prompter", ...)`, cf. `lib.rs:841`). Note the mic stream currently lives in the WebView (§3.1) — a native recognizer would open its own capture (CoreAudio/AVAudioEngine) rather than receiving audio over IPC.
+Remaining extension surface here: swapping the recognizer (e.g. a Whisper sidecar for more locales) only requires emitting the same NDJSON protocol from a different binary; nothing above the sidecar changes.
 
 ### 7b. Script preprocessing before a script is loaded into the prompter
 
