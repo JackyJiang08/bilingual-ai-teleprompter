@@ -1,8 +1,21 @@
-# OpenTeleprompter
+# Bilingual AI Teleprompter
 
 A free, open source voice-activated teleprompter for **macOS** (Windows v3 coming soon).
 
 **Speak → it scrolls. Stop → it pauses. No subscriptions. No cloud. No accounts.**
+
+---
+
+## Attribution
+
+This project is based on [openTeleprompt](https://github.com/ArunNGun/openTeleprompt) by [ArunNGun](https://github.com/ArunNGun), released under the [MIT License](https://github.com/ArunNGun/openTeleprompt#license). All credit for the original teleprompter — the voice-activated scrolling engine, Dynamic Island / Classic overlay modes, rich text editor, script library, and the rest of the upstream feature set — belongs to the upstream author. The full upstream commit history is preserved in this repository.
+
+This fork extends the original project with:
+
+- **Chinese / bilingual speech tracking** — voice-activated scrolling that follows Mandarin and mixed Chinese–English delivery, not just English speech (planned; in development)
+- **AI script preprocessing** — automatic script cleanup, segmentation, and cue-marker insertion before a session (planned; in development)
+
+See [NOTICE](NOTICE) for license and provenance details. Upstream repository: https://github.com/ArunNGun/openTeleprompt
 
 ---
 
@@ -150,3 +163,5 @@ PRs welcome! See [CONTRIBUTING.md](CONTRIBUTING.md).
 ## License
 
 MIT — free forever.
+
+This is a fork of [openTeleprompt](https://github.com/ArunNGun/openTeleprompt) by ArunNGun, which declares the MIT License in its README. See [NOTICE](NOTICE) for details.
