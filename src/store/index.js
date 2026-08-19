@@ -15,6 +15,9 @@ export const useAppStore = create((set, get) => ({
     theme: 'dark',
     speechLang: 'en-US',
     wordTracking: true,
+    aiProvider: '',
+    aiModel: '',
+    aiLocalUrl: 'http://localhost:11434',
   },
   setConfig: (patch) => set((s) => ({ config: { ...s.config, ...patch } })),
 

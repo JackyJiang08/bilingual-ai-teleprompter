@@ -43,6 +43,9 @@ export default function App() {
         micDeviceId: cfg.micDeviceId ?? cfg.mic_device_id ?? 'default',
         speechLang:   cfg.speechLang   ?? cfg.speech_lang   ?? 'en-US',
         wordTracking: cfg.wordTracking ?? cfg.word_tracking ?? true,
+        aiProvider:   cfg.aiProvider   ?? cfg.ai_provider   ?? '',
+        aiModel:      cfg.aiModel      ?? cfg.ai_model      ?? '',
+        aiLocalUrl:   cfg.aiLocalUrl   ?? cfg.ai_local_url  ?? 'http://localhost:11434',
       })
       API.setIgnoreMouse(false)
     })
@@ -56,7 +59,8 @@ export default function App() {
       const patch = {}
       const keys = ['mode','theme','scrollSpeed','scroll_speed','opacity','threshold',
                     'autoScroll','auto_scroll','micDeviceId','mic_device_id','fontSize','font_size',
-                    'speechLang','speech_lang','wordTracking','word_tracking']
+                    'speechLang','speech_lang','wordTracking','word_tracking',
+                    'aiProvider','ai_provider','aiModel','ai_model','aiLocalUrl','ai_local_url']
       keys.forEach(k => { if (cfg[k] !== undefined) patch[k] = cfg[k] })
       // Normalise snake_case → camelCase
       if (patch.scroll_speed  !== undefined) { patch.scrollSpeed  = patch.scroll_speed;  delete patch.scroll_speed }
@@ -65,6 +69,9 @@ export default function App() {
       if (patch.font_size     !== undefined) { patch.fontSize     = patch.font_size;     delete patch.font_size     }
       if (patch.speech_lang   !== undefined) { patch.speechLang   = patch.speech_lang;   delete patch.speech_lang   }
       if (patch.word_tracking !== undefined) { patch.wordTracking = patch.word_tracking; delete patch.word_tracking }
+      if (patch.ai_provider   !== undefined) { patch.aiProvider   = patch.ai_provider;   delete patch.ai_provider   }
+      if (patch.ai_model      !== undefined) { patch.aiModel      = patch.ai_model;      delete patch.ai_model      }
+      if (patch.ai_local_url  !== undefined) { patch.aiLocalUrl   = patch.ai_local_url;  delete patch.ai_local_url  }
       if (Object.keys(patch).length) setConfig(patch)
     })
 

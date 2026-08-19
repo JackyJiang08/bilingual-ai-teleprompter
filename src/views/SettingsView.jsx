@@ -15,7 +15,15 @@ const API = {
   hideSettings:   () => tauriInvoke('hide_settings'),
   getSpeechStatus:() => tauriInvoke('get_speech_status'),
   onSpeechMsg:    (cb) => tauriListen('speech-msg', (e) => cb(e.payload)),
+  setAiKey:       (key) => tauriInvoke('set_ai_key', { key }),
+  hasAiKey:       () => tauriInvoke('has_ai_key'),
 }
+
+const AI_PROVIDERS = [
+  { id: '',          label: 'Off' },
+  { id: 'anthropic', label: 'Claude API' },
+  { id: 'local',     label: 'Local' },
+]
 
 const SPEECH_LANGS = [
   { id: 'en-US', label: 'English' },
@@ -56,6 +64,11 @@ export default function SettingsView() {
   const [wordTracking, setWordTracking] = useState(true)
   const [speechLang, setSpeechLang] = useState('en-US')
   const [speechStatus, setSpeechStatus] = useState(null)
+  const [aiProvider, setAiProvider] = useState('')
+  const [aiModel, setAiModel] = useState('')
+  const [aiLocalUrl, setAiLocalUrl] = useState('http://localhost:11434')
+  const [aiKeyInput, setAiKeyInput] = useState('')
+  const [hasAiKey, setHasAiKey] = useState(false)
   const [meterPct, setMeterPct] = useState(0)
   const [meterActive, setMeterActive] = useState(false)
 
@@ -90,6 +103,7 @@ export default function SettingsView() {
     // Speech engine status — initial value plus live updates (state changes
     // only; partial transcripts are not status)
     API.getSpeechStatus().then(v => { if (v) setSpeechStatus(v) })
+    API.hasAiKey().then(v => setHasAiKey(!!v))
     API.onSpeechMsg(v => {
       if (!v || !v.type) return
       if (v.type === 'partial' || v.type === 'final') return
@@ -134,6 +148,9 @@ export default function SettingsView() {
     if (c.micDeviceId)  setMicId(c.micDeviceId)
     if (c.wordTracking != null) setWordTracking(!!c.wordTracking)
     if (c.speechLang)   setSpeechLang(c.speechLang)
+    if (c.aiProvider !== undefined) setAiProvider(c.aiProvider)
+    if (c.aiModel !== undefined)    setAiModel(c.aiModel)
+    if (c.aiLocalUrl)   setAiLocalUrl(c.aiLocalUrl)
   }
 
   async function populateMics() {
@@ -236,6 +253,23 @@ export default function SettingsView() {
   function handleSpeechLang(id) {
     setSpeechLang(id)
     API.setConfig({ speechLang: id })
+  }
+
+  function handleAiProvider(id) {
+    setAiProvider(id)
+    API.setConfig({ aiProvider: id })
+  }
+
+  async function handleSaveAiKey() {
+    if (!aiKeyInput.trim()) return
+    await API.setAiKey(aiKeyInput.trim())
+    setAiKeyInput('')
+    setHasAiKey(true)
+  }
+
+  async function handleClearAiKey() {
+    await API.setAiKey('')
+    setHasAiKey(false)
   }
 
   const thresholdPct = thresholdSlider + '%'
@@ -363,6 +397,88 @@ export default function SettingsView() {
             <input type="range" className="s-slider" min="0" max="100" step="1"
               value={thresholdSlider} onChange={e => handleThresholdSlider(+e.target.value)} />
           </Row>
+
+          <Divider />
+
+          {/* Prepare with AI */}
+          <div className="s-row s-col">
+            <span className="s-label">Prepare with AI</span>
+            <div className="s-mode-group">
+              {AI_PROVIDERS.map(p => (
+                <button
+                  key={p.id}
+                  className={`s-mode-btn${aiProvider === p.id ? ' active' : ''}`}
+                  onClick={() => handleAiProvider(p.id)}
+                >{p.label}</button>
+              ))}
+            </div>
+          </div>
+          {aiProvider === 'anthropic' && <>
+            <div className="s-row s-col">
+              <span className="s-label">Model</span>
+              <input
+                className="s-input"
+                placeholder="claude-opus-5 (default)"
+                value={aiModel}
+                onChange={e => setAiModel(e.target.value)}
+                onBlur={() => API.setConfig({ aiModel: aiModel.trim() })}
+              />
+            </div>
+            <div className="s-row s-col">
+              <span className="s-label">API Key{hasAiKey ? ' · saved in Keychain ✓' : ''}</span>
+              <div className="s-key-row">
+                <input
+                  className="s-input"
+                  type="password"
+                  placeholder={hasAiKey ? '••••••••••••••••' : 'sk-ant-…'}
+                  value={aiKeyInput}
+                  onChange={e => setAiKeyInput(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') handleSaveAiKey() }}
+                />
+                {aiKeyInput.trim()
+                  ? <button className="s-mode-btn active" onClick={handleSaveAiKey}>Save</button>
+                  : hasAiKey && <button className="s-mode-btn" onClick={handleClearAiKey}>Clear</button>}
+              </div>
+              <span className="s-note">
+                Stored in the macOS Keychain — never in config files. Get a key
+                at console.anthropic.com.
+              </span>
+            </div>
+          </>}
+          {aiProvider === 'local' && <>
+            <div className="s-row s-col">
+              <span className="s-label">Server URL</span>
+              <input
+                className="s-input"
+                placeholder="http://localhost:11434"
+                value={aiLocalUrl}
+                onChange={e => setAiLocalUrl(e.target.value)}
+                onBlur={() => API.setConfig({ aiLocalUrl: aiLocalUrl.trim() })}
+              />
+            </div>
+            <div className="s-row s-col">
+              <span className="s-label">Model (required)</span>
+              <input
+                className="s-input"
+                placeholder="llama3.1"
+                value={aiModel}
+                onChange={e => setAiModel(e.target.value)}
+                onBlur={() => API.setConfig({ aiModel: aiModel.trim() })}
+              />
+              <span className="s-note">
+                Any OpenAI-compatible server, e.g. Ollama (`ollama serve`, then
+                `ollama pull` a model). Runs fully offline.
+              </span>
+            </div>
+          </>}
+          {aiProvider !== '' && (
+            <div className="s-row">
+              <span className="s-note">
+                Your script is sent to the provider only when you click
+                ✦ Prepare in the editor — never automatically.
+              </span>
+            </div>
+          )}
 
           <Divider />
 

@@ -464,6 +464,46 @@ body.mode-classic .idle-chevron {
   text-underline-offset: 3px;
 }
 .read-marker.tok-spoken { opacity: 0.35; }
+
+/* ── Prepare with AI ── */
+#ai-error {
+  padding: 2px 16px 6px;
+  font-size: 10px; line-height: 1.4;
+  color: #f87171;
+}
+#ai-review {
+  flex: 1; min-height: 0;
+  display: flex; gap: 10px;
+  padding: 6px 14px 12px;
+}
+#ai-review .ai-col {
+  flex: 1; min-width: 0;
+  display: flex; flex-direction: column;
+}
+.ai-col-title {
+  font-size: 9px; font-weight: 600;
+  letter-spacing: 0.05em; text-transform: uppercase;
+  color: var(--text-muted);
+  padding: 0 2px 4px;
+}
+.ai-original, .ai-prepared {
+  flex: 1; min-height: 0; overflow-y: auto;
+  font-family: 'DM Mono', monospace;
+  font-size: 10.5px; line-height: 1.55;
+  background: var(--bg-secondary);
+  border: 1px solid transparent;
+  border-radius: 8px; padding: 8px 10px;
+}
+.ai-original {
+  white-space: pre-wrap;
+  color: var(--text-secondary);
+}
+.ai-prepared {
+  resize: none; outline: none;
+  color: var(--script-text);
+  border-color: var(--accent-bg);
+}
+.ai-prepared:focus { border-color: var(--accent); }
 #vol-meter-wrap {
   position: absolute; bottom: 40px; left: 10px; right: 10px;
   display: flex; align-items: center; gap: 6px;
