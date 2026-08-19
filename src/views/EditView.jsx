@@ -6,6 +6,7 @@ import { Color } from '@tiptap/extension-color'
 import { useAppStore } from '../store'
 import { API } from '../lib/api'
 import { mapAiError, preparedTextToDoc, prepareScript } from '../lib/ai'
+import { sanitizeDocColors } from '../lib/tokenizer'
 
 const COLORS = [
   { label: 'Yellow', value: '#facc15' },
@@ -82,7 +83,7 @@ export default function EditView() {
     const script = scripts[currentScriptIndex]
     if (!script) return
     try {
-      editor.commands.setContent(JSON.parse(script.content))
+      editor.commands.setContent(sanitizeDocColors(JSON.parse(script.content)))
     } catch {
       editor.commands.setContent(`<p>${script.text || ''}</p>`)
     }
@@ -156,7 +157,7 @@ export default function EditView() {
     const script = scripts[i]
     if (!script) return
     try {
-      editor.commands.setContent(JSON.parse(script.content))
+      editor.commands.setContent(sanitizeDocColors(JSON.parse(script.content)))
     } catch {
       editor.commands.setContent(`<p>${script.text || ''}</p>`)
     }

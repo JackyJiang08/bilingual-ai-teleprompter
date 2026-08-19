@@ -712,7 +712,9 @@ body.mode-classic .idle-quit { opacity: 1; }
   font-family: 'DM Mono', monospace;
   font-size: 13px;
   line-height: 1.7;
-  color: var(--text-primary);
+  /* Default script text color — white on dark, dark on light — same token
+     the read view uses, so what you type is what you'll read */
+  color: var(--script-text);
   caret-color: var(--caret);
   min-height: 80px;
 }

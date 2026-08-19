@@ -140,3 +140,15 @@ describe('mapAiError', () => {
     expect(mapAiError('total gibberish').code).toBe('unknown')
   })
 })
+
+// ── WS4: AI-prepared output inherits the default style ─────
+describe('preparedTextToDoc default styling', () => {
+  it('produces text nodes with no marks, so output uses the theme default color', () => {
+    const out = preparedTextToDoc('line one [PAUSE]\n\n中文行')
+    for (const p of out.content) {
+      for (const n of p.content || []) {
+        expect(n.marks).toBeUndefined()
+      }
+    }
+  })
+})

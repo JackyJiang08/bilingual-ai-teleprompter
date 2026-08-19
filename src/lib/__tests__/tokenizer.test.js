@@ -87,3 +87,50 @@ describe('tokenizeDoc', () => {
     expect(tokens.map(t => t.type)).toEqual(['word', 'newline', 'word', 'newline'])
   })
 })
+
+// ── WS4: theme-safe color defaults ─────────────────────────
+import { sanitizeColor, sanitizeDocColors } from '../tokenizer'
+
+describe('sanitizeColor', () => {
+  it('drops invisible-risk neutrals in any common notation', () => {
+    for (const c of ['#ffffff', '#fff', '#FFFFFF', 'white', '#000', '#000000', 'black', 'transparent', 'rgb(255,255,255)', 'rgba(0, 0, 0, 0.9)']) {
+      expect(sanitizeColor(c)).toBeNull()
+    }
+  })
+  it('keeps real colors and empty values', () => {
+    expect(sanitizeColor('#facc15')).toBe('#facc15')
+    expect(sanitizeColor('#4ade80')).toBe('#4ade80')
+    expect(sanitizeColor(null)).toBeNull()
+  })
+})
+
+describe('sanitizeDocColors', () => {
+  const doc = {
+    type: 'doc',
+    content: [{
+      type: 'paragraph',
+      content: [
+        { type: 'text', text: 'legacy', marks: [{ type: 'textStyle', attrs: { color: '#ffffff' } }] },
+        { type: 'text', text: 'kept', marks: [{ type: 'bold' }, { type: 'textStyle', attrs: { color: '#4ade80' } }] },
+      ],
+    }],
+  }
+  it('strips neutral color marks but keeps everything else', () => {
+    const out = sanitizeDocColors(doc)
+    expect(out.content[0].content[0].marks).toBeUndefined()
+    expect(out.content[0].content[1].marks).toEqual([{ type: 'bold' }, { type: 'textStyle', attrs: { color: '#4ade80' } }])
+    // input untouched
+    expect(doc.content[0].content[0].marks.length).toBe(1)
+  })
+})
+
+describe('tokenizeDoc color sanitising', () => {
+  it('white-marked words tokenize with no explicit color', () => {
+    const doc = {
+      type: 'doc',
+      content: [{ type: 'paragraph', content: [{ type: 'text', text: 'hello', marks: [{ type: 'textStyle', attrs: { color: '#fff' } }] }] }],
+    }
+    const tokens = tokenizeDoc(doc)
+    expect(tokens[0].color).toBeNull()
+  })
+})
