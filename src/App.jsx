@@ -35,9 +35,11 @@ const DEMO_DOC = {
 
 export default function App() {
   const { view, config, setConfig, setScripts, setView, setScriptDoc, setScriptText } = useAppStore()
-  // ?hoverdemo=1 (browser-only test hook) starts the pill in its hover state
+  // ?hoverdemo=1 (demo/test hook) starts the pill in its hover state.
+  // Params are only ever present via the snapshot harness (browser) or the
+  // dev-only TELEPROMPTER_DEMO_PARAMS env var (screenshot captures in Tauri).
   const [isHovered, setIsHovered] = useState(() =>
-    !window.__TAURI__ && new URLSearchParams(window.location.search).has('hoverdemo'))
+    new URLSearchParams(window.location.search).has('hoverdemo'))
   const isClassic = config.mode === 'classic'
 
   // ── Bootstrap ──────────────────────────────────────────────
@@ -102,9 +104,11 @@ export default function App() {
       .then(s => s.getTracks().forEach(t => t.stop()))
       .catch(() => {})
 
-    // Browser-only test hooks (scripts/snap.mjs): drive view/mode/theme via
-    // URL params, e.g. /?view=read&mode=notch&theme=light. No-op in Tauri.
-    if (!window.__TAURI__) {
+    // Demo/test hooks: drive view/mode/theme via URL params, e.g.
+    // /?view=read&mode=notch&theme=light. Used by scripts/snap.mjs (browser)
+    // and TELEPROMPTER_DEMO_PARAMS (dev-only, Tauri screenshot captures).
+    // Normal launches carry no params, so this is inert in production.
+    {
       const q = new URLSearchParams(window.location.search)
       const patch = {}
       if (q.get('mode')) patch.mode = q.get('mode')

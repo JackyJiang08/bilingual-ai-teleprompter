@@ -89,7 +89,7 @@ Called from `setup()` (`lib.rs:713-715`) and from `create_prompter_window()` (`l
 
 ### 2.3 Hidden from screen capture
 
-`apply_screenshare_mode()` (`lib.rs:260-262`) calls Tauri's `WebviewWindow::set_content_protected(bool)` — on macOS this sets `NSWindow.sharingType = .none`, which excludes the window from screen recording/sharing. It is applied at window creation (`lib.rs:567`, `lib.rs:717-719`) and re-applied whenever `set_config` receives `screenshareHidden` (`lib.rs:302-304`). Default is ON (`Config::default`, `lib.rs:96`).
+`apply_screenshare_mode()` calls Tauri's `WebviewWindow::set_content_protected(bool)` — on macOS this sets `NSWindow.sharingType = .none`, which excludes the window from screen recording/sharing. **Dev-only escape hatch (this fork):** launching with `TELEPROMPTER_ALLOW_CAPTURE=1` disables the protection so the pill can be screenshotted (README captures, visual debugging); the related `TELEPROMPTER_DEMO_PARAMS="view=read&trackdemo=1"` env var navigates the prompter to the same URL demo hooks the snapshot suite uses (§ tests), so fixed UI states can be driven in the real app. Neither is ever set in normal operation, so protection stays on by default. It is applied at window creation (`lib.rs:567`, `lib.rs:717-719`) and re-applied whenever `set_config` receives `screenshareHidden` (`lib.rs:302-304`). Default is ON (`Config::default`, `lib.rs:96`).
 
 ### 2.4 Resizing, click-through, dragging
 

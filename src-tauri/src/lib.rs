@@ -275,8 +275,16 @@ fn save_scripts_to_disk(scripts: &[Script]) {
 // ── Helpers ────────────────────────────────────────────────
 fn get_prompter(app: &AppHandle) -> Option<WebviewWindow> { app.get_webview_window("prompter") }
 fn get_settings(app: &AppHandle) -> Option<WebviewWindow> { app.get_webview_window("settings") }
+
+// Dev-only escape hatch: TELEPROMPTER_ALLOW_CAPTURE=1 disables screen-capture
+// protection so the pill can be screenshotted (README/docs captures, visual
+// debugging). Normal launches never set it, so content protection stays on.
+fn capture_allowed() -> bool {
+    std::env::var("TELEPROMPTER_ALLOW_CAPTURE").map(|v| v == "1").unwrap_or(false)
+}
+
 fn apply_screenshare_mode(window: &WebviewWindow, hidden: bool) {
-    let _ = window.set_content_protected(hidden);
+    let _ = window.set_content_protected(hidden && !capture_allowed());
 }
 
 // ── Commands ───────────────────────────────────────────────
@@ -987,8 +995,21 @@ pub fn run() {
                 elevate_to_notch_level(&prompter);
             }
 
-            if cfg.screenshare_hidden {
-                prompter.set_content_protected(true).ok();
+            apply_screenshare_mode(&prompter, cfg.screenshare_hidden);
+
+            // Dev-only demo hooks: TELEPROMPTER_DEMO_PARAMS="view=read&trackdemo=1"
+            // navigates the prompter to the same URL test hooks the visual
+            // snapshot suite uses, so fixed UI states can be captured in the
+            // real app. Delayed so the initial page load has settled.
+            if let Ok(params) = std::env::var("TELEPROMPTER_DEMO_PARAMS") {
+                if !params.is_empty() {
+                    let w = prompter.clone();
+                    std::thread::spawn(move || {
+                        std::thread::sleep(std::time::Duration::from_millis(1500));
+                        let js = format!("window.location.search = {};", serde_json::json!(params));
+                        let _ = w.eval(&js);
+                    });
+                }
             }
 
             // NOTE: upstream opened a first-launch "welcome" window here. It

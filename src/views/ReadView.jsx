@@ -225,10 +225,9 @@ export default function ReadView() {
     // Start recognition: word tracking when enabled (and running inside
     // Tauri), otherwise the frequency-based VAD engine
     const wantSpeech = configRef.current.wordTracking !== false && !!window.__TAURI__
-    const trackDemo = !window.__TAURI__ &&
-      new URLSearchParams(window.location.search).has('trackdemo')
+    const trackDemo = new URLSearchParams(window.location.search).has('trackdemo')
     if (trackDemo) {
-      // Browser-only visual-test hook (scripts/snap.mjs): render the
+      // Demo/test hook (snap.mjs + TELEPROMPTER_DEMO_PARAMS): render the
       // spoken/current/upcoming word states without a live recognizer
       const wordIdxs = tokens.map((t, i) => (t.type === 'word' ? i : -1)).filter(i => i >= 0)
       const cursor = wordIdxs[Math.floor(wordIdxs.length * 0.4)] ?? -1

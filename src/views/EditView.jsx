@@ -49,10 +49,9 @@ export default function EditView() {
     },
   })
 
-  // Browser-only visual-test hook (scripts/snap.mjs): ?aireview=1 renders
+  // Demo/test hook (snap.mjs + TELEPROMPTER_DEMO_PARAMS): ?aireview=1 renders
   // the Prepare-with-AI review panel with fixed sample content
   useEffect(() => {
-    if (window.__TAURI__) return
     if (!new URLSearchParams(window.location.search).has('aireview')) return
     const originalText =
       'Hello everyone, today I want to give you an update on our project. ' +
