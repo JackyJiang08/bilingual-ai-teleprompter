@@ -34,7 +34,7 @@ const DEMO_DOC = {
 }
 
 export default function App() {
-  const { view, config, setConfig, setScripts, setView, setScriptDoc, setScriptText } = useAppStore()
+  const { view, config, setConfig, setScripts, setView, setScriptDoc, setScriptText, setCurrentScriptIndex } = useAppStore()
   // ?hoverdemo=1 (demo/test hook) starts the pill in its hover state.
   // Params are only ever present via the snapshot harness (browser) or the
   // dev-only TELEPROMPTER_DEMO_PARAMS env var (screenshot captures in Tauri).
@@ -65,8 +65,10 @@ export default function App() {
       API.setIgnoreMouse(false)
     })
 
-    // Load scripts
-    API.getScripts().then((s) => { if (s) setScripts(s) })
+    // Load scripts — skipped when a URL demo param drives the view, so
+    // screenshot captures never show the real script library
+    const demoView = new URLSearchParams(window.location.search).get('view')
+    if (!demoView) API.getScripts().then((s) => { if (s) setScripts(s) })
 
     // Live config updates from settings window
     API.onConfigUpdate((cfg) => {
@@ -118,6 +120,13 @@ export default function App() {
       if (v === 'read') {
         setScriptDoc(DEMO_DOC)
         setScriptText('Welcome to the bilingual teleprompter demo.')
+      }
+      if (v === 'edit') {
+        setScripts([
+          { name: 'Product Demo', text: 'Welcome to the bilingual teleprompter demo.', content: JSON.stringify(DEMO_DOC) },
+          { name: '发布稿 Launch Notes', text: '', content: JSON.stringify(DEMO_DOC) },
+        ])
+        setCurrentScriptIndex(0)
       }
       if (v) setView(v)
     }
