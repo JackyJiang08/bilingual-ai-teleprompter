@@ -1,5 +1,14 @@
 name: Release
 
+# Maintenance notes:
+# - The release body below is written per-release; update it before tagging
+#   a new version (it is the canonical release-notes draft).
+# - Asset naming caveat: DMG names derive from tauri.conf.json productName
+#   ("Bilingual AI Teleprompter"); GitHub replaces spaces with dots in
+#   uploaded asset filenames (Bilingual.AI.Teleprompter_x.y.z_arch.dmg).
+#   Do NOT rename the product to "fix" this — the app is published under
+#   this name. If predictable asset names ever matter, rename the files in
+#   a build step before upload instead.
 on:
   push:
     tags:
@@ -14,7 +23,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Create Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ github.ref_name }}
           name: ${{ github.ref_name }} — Bilingual AI Teleprompter
@@ -74,14 +83,14 @@ jobs:
     runs-on: macos-latest
     needs: create-release
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-darwin
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
 
@@ -91,7 +100,7 @@ jobs:
         run: npx @tauri-apps/cli build --target aarch64-apple-darwin
 
       - name: Upload DMG
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ github.ref_name }}
           draft: true
@@ -104,14 +113,14 @@ jobs:
     runs-on: macos-latest
     needs: create-release
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-apple-darwin
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
 
@@ -121,7 +130,7 @@ jobs:
         run: npx @tauri-apps/cli build --target x86_64-apple-darwin
 
       - name: Upload DMG
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ github.ref_name }}
           draft: true
