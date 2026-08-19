@@ -306,6 +306,24 @@ body.mode-classic .idle-chevron {
   transform: translateY(0);
 }
 
+/* Quit — hover reveal next to the chevron (issue #1) */
+.idle-quit {
+  display: flex; align-items: center; justify-content: center;
+  width: 16px; height: 16px; padding: 0;
+  margin-left: 2px; flex-shrink: 0;
+  background: none; border: none; border-radius: 50%;
+  color: var(--text-muted); cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.2s ease, color 0.15s ease;
+}
+.idle-pill-content.hovered .idle-quit,
+body.mode-classic .idle-quit { opacity: 1; }
+.idle-quit:hover { color: #ef4444; }
+
+/* Quit in the editor header */
+.pill-btn.edit-quit { margin-left: 2px; }
+.pill-btn.edit-quit:hover { color: #ef4444; }
+
 /* Legacy idle-inner (classic mode) */
 .idle-inner {
   display: flex;

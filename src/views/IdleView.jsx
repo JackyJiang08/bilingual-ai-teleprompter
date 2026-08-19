@@ -1,8 +1,14 @@
 import { useAppStore } from '../store'
+import { API } from '../lib/api'
 
 export default function IdleView({ isHovered }) {
   const { setView, isSpeaking, isPaused, config } = useAppStore()
   const isClassic = config.mode === 'classic'
+
+  function handleQuit(e) {
+    e.stopPropagation() // don't also open the editor
+    API.quit()
+  }
 
   function handleOpen() {
     setView('edit')
@@ -65,6 +71,22 @@ export default function IdleView({ isHovered }) {
             strokeLinejoin="round"
           />
         </svg>
+
+        {/* Quit — hover reveal in notch mode; always visible in classic
+            (same pattern as the chevron). See issue #1. */}
+        {(isHovered || isClassic) && (
+          <button
+            className="idle-quit"
+            onClick={handleQuit}
+            title="Quit Bilingual AI Teleprompter"
+            aria-label="Quit"
+          >
+            <svg width="10" height="10" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+              <path d="M6 1v5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+              <path d="M3.2 3.2a4 4 0 1 0 5.6 0" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+            </svg>
+          </button>
+        )}
 
       </div>
     </div>

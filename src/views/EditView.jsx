@@ -237,6 +237,7 @@ export default function EditView() {
         <button className="pill-btn ghost" onClick={handleNew}>+ New</button>
         <button className="pill-btn ghost" onClick={saveCurrentScript}>Save</button>
         <button className="pill-btn accent" onClick={handleStart}>Go →</button>
+        <button className="pill-btn ghost edit-quit" onClick={() => API.quit()} title="Quit app" aria-label="Quit app">⏻</button>
       </div>
 
       {aiError && <div id="ai-error">{aiError}</div>}

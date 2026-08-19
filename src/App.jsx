@@ -35,7 +35,9 @@ const DEMO_DOC = {
 
 export default function App() {
   const { view, config, setConfig, setScripts, setView, setScriptDoc, setScriptText } = useAppStore()
-  const [isHovered, setIsHovered] = useState(false)
+  // ?hoverdemo=1 (browser-only test hook) starts the pill in its hover state
+  const [isHovered, setIsHovered] = useState(() =>
+    !window.__TAURI__ && new URLSearchParams(window.location.search).has('hoverdemo'))
   const isClassic = config.mode === 'classic'
 
   // ── Bootstrap ──────────────────────────────────────────────
@@ -84,6 +86,15 @@ export default function App() {
       if (patch.ai_model      !== undefined) { patch.aiModel      = patch.ai_model;      delete patch.ai_model      }
       if (patch.ai_local_url  !== undefined) { patch.aiLocalUrl   = patch.ai_local_url;  delete patch.ai_local_url  }
       if (Object.keys(patch).length) setConfig(patch)
+    })
+
+    // Global shortcut ⌘⇧E: open the script editor (explicit user action).
+    // Read-mode shortcuts are handled in ReadView; this one is app-level so
+    // it works from the idle pill.
+    API.onShortcut((action) => {
+      if (action === 'edit' && useAppStore.getState().view === 'idle') {
+        setView('edit')
+      }
     })
 
     // Probe mic permission once so browser doesn't ask mid-session
