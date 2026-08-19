@@ -84,10 +84,17 @@ pub struct Config {
     pub speech_lang: String,
     #[serde(default = "default_word_tracking")]
     pub word_tracking: bool,
+    #[serde(default)]
+    pub ai_provider: String, // "" (off) | "anthropic" | "local"
+    #[serde(default)]
+    pub ai_model: String,
+    #[serde(default = "default_ai_local_url")]
+    pub ai_local_url: String,
 }
 
 fn default_speech_lang() -> String { "en-US".to_string() }
 fn default_word_tracking() -> bool { true }
+fn default_ai_local_url() -> String { "http://localhost:11434".to_string() }
 
 impl Default for Config {
     fn default() -> Self {
@@ -108,6 +115,9 @@ impl Default for Config {
             theme: "dark".to_string(),
             speech_lang: default_speech_lang(),
             word_tracking: default_word_tracking(),
+            ai_provider: String::new(),
+            ai_model: String::new(),
+            ai_local_url: default_ai_local_url(),
         }
     }
 }
@@ -306,6 +316,9 @@ fn set_config(app: AppHandle, state: State<AppState>, patch: serde_json::Value) 
     if let Some(v) = patch.get("theme").and_then(|v| v.as_str()) { cfg.theme = v.to_string(); }
     if let Some(v) = patch.get("speechLang").and_then(|v| v.as_str()) { cfg.speech_lang = v.to_string(); }
     if let Some(v) = patch.get("wordTracking").and_then(|v| v.as_bool()) { cfg.word_tracking = v; }
+    if let Some(v) = patch.get("aiProvider").and_then(|v| v.as_str()) { cfg.ai_provider = v.to_string(); }
+    if let Some(v) = patch.get("aiModel").and_then(|v| v.as_str()) { cfg.ai_model = v.to_string(); }
+    if let Some(v) = patch.get("aiLocalUrl").and_then(|v| v.as_str()) { cfg.ai_local_url = v.to_string(); }
 
     let cfg_clone = cfg.clone();
     save_config(&cfg_clone);
@@ -603,6 +616,171 @@ fn get_speech_status(state: State<AppState>) -> serde_json::Value {
     state.speech_status.lock().unwrap().clone()
 }
 
+// ── AI provider proxy (Prepare with AI) ────────────────────
+// The frontend builds prompts and parses responses (src/lib/ai.js); this side
+// is a dumb transport that owns the secrets: the Anthropic API key lives in
+// the macOS Keychain and is read here at request time — it never crosses IPC
+// to the WebView. Errors are returned as "code:detail" strings; the frontend
+// maps codes to actionable messages.
+
+const KEYCHAIN_SERVICE: &str = "OpenTeleprompter";
+const KEYCHAIN_ACCOUNT: &str = "anthropic-api-key";
+
+fn keyring_entry() -> Result<keyring::Entry, String> {
+    keyring::Entry::new(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT).map_err(|e| format!("keychain:{e}"))
+}
+
+#[tauri::command]
+fn set_ai_key(key: String) -> Result<(), String> {
+    let entry = keyring_entry()?;
+    if key.is_empty() {
+        match entry.delete_credential() {
+            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+            Err(e) => Err(format!("keychain:{e}")),
+        }
+    } else {
+        entry.set_password(&key).map_err(|e| format!("keychain:{e}"))
+    }
+}
+
+#[tauri::command]
+fn has_ai_key() -> bool {
+    keyring_entry()
+        .ok()
+        .and_then(|e| e.get_password().ok())
+        .map(|k| !k.is_empty())
+        .unwrap_or(false)
+}
+
+fn api_error_message(v: &serde_json::Value) -> String {
+    v.get("error")
+        .and_then(|e| e.get("message"))
+        .and_then(|m| m.as_str())
+        .unwrap_or("request failed")
+        .to_string()
+}
+
+fn map_http_error(status: u16, retry_after: &str, v: &serde_json::Value) -> String {
+    let msg = api_error_message(v);
+    match status {
+        401 | 403 => format!("auth:{msg}"),
+        404 => format!("model_not_found:{msg}"),
+        429 => format!("rate_limit:{retry_after}|{msg}"),
+        _ => format!("server:{status} {msg}"),
+    }
+}
+
+#[tauri::command]
+async fn ai_complete(app: AppHandle, system: String, prompt: String) -> Result<String, String> {
+    // Snapshot config before any await — the Mutex guard must not cross it
+    let (provider, model, local_url) = {
+        let state = app.state::<AppState>();
+        let cfg = state.config.lock().unwrap();
+        (cfg.ai_provider.clone(), cfg.ai_model.clone(), cfg.ai_local_url.clone())
+    };
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(300))
+        .build()
+        .map_err(|e| format!("network:{e}"))?;
+
+    match provider.as_str() {
+        "anthropic" => {
+            let key = keyring_entry()?
+                .get_password()
+                .map_err(|_| "no_api_key:No API key saved".to_string())?;
+            let model = if model.is_empty() { "claude-opus-5".to_string() } else { model };
+            let body = serde_json::json!({
+                "model": model,
+                "max_tokens": 8192,
+                "system": system,
+                // Server-side refusal fallback: if safety classifiers decline,
+                // the API retries on Anthropic's recommended model in-call.
+                "fallbacks": "default",
+                "messages": [{ "role": "user", "content": prompt }],
+            });
+            let resp = client
+                .post("https://api.anthropic.com/v1/messages")
+                .header("x-api-key", key)
+                .header("anthropic-version", "2023-06-01")
+                .header("anthropic-beta", "server-side-fallback-2026-07-01")
+                .json(&body)
+                .send()
+                .await
+                .map_err(|e| format!("network:{e}"))?;
+
+            let status = resp.status().as_u16();
+            let retry_after = resp
+                .headers()
+                .get("retry-after")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("")
+                .to_string();
+            let v: serde_json::Value = resp.json().await.map_err(|e| format!("parse:{e}"))?;
+            if status >= 400 {
+                return Err(map_http_error(status, &retry_after, &v));
+            }
+            // Check stop_reason before reading content — safety classifiers
+            // return HTTP 200 with stop_reason "refusal" and empty content.
+            if v.get("stop_reason").and_then(|s| s.as_str()) == Some("refusal") {
+                return Err("refusal:The model declined to process this script".to_string());
+            }
+            v.get("content")
+                .and_then(|c| c.as_array())
+                .and_then(|blocks| {
+                    blocks.iter().find_map(|b| {
+                        if b.get("type").and_then(|t| t.as_str()) == Some("text") {
+                            b.get("text").and_then(|t| t.as_str()).map(String::from)
+                        } else {
+                            None
+                        }
+                    })
+                })
+                .ok_or_else(|| "parse:empty response".to_string())
+        }
+        "local" => {
+            if model.is_empty() {
+                return Err("no_model:Set a model name in Settings".to_string());
+            }
+            let url = format!("{}/v1/chat/completions", local_url.trim_end_matches('/'));
+            let body = serde_json::json!({
+                "model": model,
+                "messages": [
+                    { "role": "system", "content": system },
+                    { "role": "user", "content": prompt },
+                ],
+            });
+            let resp = client
+                .post(&url)
+                .json(&body)
+                .send()
+                .await
+                .map_err(|e| format!("network:{e}"))?;
+
+            let status = resp.status().as_u16();
+            let retry_after = resp
+                .headers()
+                .get("retry-after")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("")
+                .to_string();
+            let v: serde_json::Value = resp.json().await.map_err(|e| format!("parse:{e}"))?;
+            if status >= 400 {
+                return Err(map_http_error(status, &retry_after, &v));
+            }
+            v.get("choices")
+                .and_then(|c| c.as_array())
+                .and_then(|c| c.first())
+                .and_then(|c| c.get("message"))
+                .and_then(|m| m.get("content"))
+                .and_then(|t| t.as_str())
+                .map(String::from)
+                .ok_or_else(|| "parse:empty response".to_string())
+        }
+        _ => Err("no_provider:No AI provider configured".to_string()),
+    }
+}
+
 // ── Window creation ────────────────────────────────────────
 
 fn create_prompter_window(app: &AppHandle) {
@@ -767,6 +945,7 @@ pub fn run() {
             close_welcome, open_url, open_settings,
             focus_prompter, elevate_notch_window,
             start_speech, stop_speech, get_speech_status,
+            ai_complete, set_ai_key, has_ai_key,
         ])
         .setup(|app| {
             let app_handle = app.handle().clone();
