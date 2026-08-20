@@ -27,15 +27,15 @@ See [NOTICE](NOTICE) for license and provenance details. Upstream repository: ht
 <p align="center"><img src="docs/screenshots/word-tracking.png" width="600" alt="Word-level speech tracking on a mixed Chinese/English script"></p>
 <p align="center"><em>Word tracking on a mixed 中文/English script: spoken text dims, the current word is underlined, cue markers pause for you.</em></p>
 
-<p align="center"><img src="docs/screenshots/editor.png" width="600" alt="The script editor with library, rich text toolbar, and cue markers"></p>
-<p align="center"><em>The script editor: library, rich text, cue markers — and ✦ Prepare.</em></p>
+<p align="center"><img src="docs/screenshots/editor.png" width="600" alt="The script editor: one-row header with script tabs, Prepare, and Go; autosave indicator and cue/format menus in the footer"></p>
+<p align="center"><em>The script editor: script tabs, ✦ Prepare, and Go in one row — edits autosave, cue markers and formatting live in the footer menus.</em></p>
 
 <p align="center"><img src="docs/screenshots/ai-review.png" width="600" alt="Prepare with AI side-by-side review"></p>
 <p align="center"><em>Prepare with AI: side-by-side review before anything replaces your script.</em></p>
 
 ---
 
-## Download — v1.0.0 (this fork)
+## Download — v1.1.0 (this fork)
 
 | Platform | Link | Notes |
 |---|---|---|
@@ -51,13 +51,14 @@ This fork is **macOS only** (the speech-tracking sidecar uses Apple's Speech fra
 - 🏝️ **Dynamic Island mode** — real concave corners, Apple spring physics, pixel-perfect notch fit
 - 🖥️ **Classic mode** — draggable floating pill, works on any Mac (notch or not)
 - 🎙️ **Voice-activated scroll** — frequency analysis (85–3400 Hz), not just volume. Only your voice triggers it
-- 📝 **Rich text editor** — bold, highlights, cue markers `[PAUSE]` `[SLOW]` `[BREATHE]`
-- 📚 **Script library** — save and switch multiple scripts, auto-saves
+- 📝 **Distraction-free editor** — script tabs, ✦ Prepare, and Go in a single header row; bold/color and cue markers `[PAUSE]` `[SLOW]` `[BREATHE]` in compact footer menus
+- 📚 **Script library** — switch scripts from the header tabs; edits autosave (⌘S also works)
+- 🎯 **Script-biased recognition** *(macOS 14+)* — word tracking builds an on-device language model from your script, measurably improving recognition of names and technical terms (see [Word Tracking](#word-tracking-this-fork))
 - 🔇 **Invisible during screen share** — Zoom, Meet, Loom can't see it. Only you can
 - 🌗 **Light & dark theme** — pastel light default, toggleable
 - ⚡ **Live controls** — speed + font size adjustable while reading
 - 🌫️ **Opacity control** — barely-there to solid
-- ⌨️ **Global shortcuts** — ⌘⇧Space, ⌘⇧↑↓, ⌘⇧R, ⌘⇧E (open editor)
+- ⌨️ **Global shortcuts** — ⌘⇧Space, ⌘⇧↑↓, ⌘⇧R, ⌘⇧E (open editor); ⌘S saves in the editor
 
 ---
 
@@ -69,7 +70,8 @@ Instead of scrolling at a fixed speed whenever it hears sound, the prompter can 
 - **Scroll follows you** — the current word is eased toward a reading line at ~35% of the viewport. Speed up, slow down, skip a phrase, or stumble: the cursor tolerates skipped words, fillers, and misreads, and never jumps backward.
 - **English and Mandarin** — pick the language in Settings → Word Tracking (English / 中文). Chinese scripts are tracked per character, so no spaces are needed; mixed Chinese–English scripts work, including Latin words embedded in Chinese text (e.g. 我们的React项目).
 - **100% on-device** — recognition uses Apple's Speech framework with `requiresOnDeviceRecognition`. No audio or transcripts ever leave your Mac. macOS will ask once for Speech Recognition permission (plus the existing microphone permission).
-- **Graceful fallback** — if Speech permission is denied or the on-device model for the selected language isn't installed (System Settings › Keyboard › Dictation), the app falls back to the original frequency-based voice activation and says so in Settings. You can also turn Word Tracking off entirely.
+- **Script-biased recognition (macOS 14+)** — at the start of each reading session the app builds a customized on-device language model from your script (cached per script, rebuilt on edit), biasing recognition toward the exact words on screen. On a jargon-heavy test sentence this raised words recognized from 10/18 to 13/18 and cut p90 word-to-recognition latency from 1428 ms to 792 ms; common-vocabulary text is unaffected. On older systems or unsupported locales the stock model is used, silently. Display-side responsiveness is also tuned so the highlight keeps up with your voice: the scroll-easing time constant dropped from ~280 ms to ~100 ms and the spoken-word fade from 300 ms to 150 ms. Measurement methodology and full numbers: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) §3.3.
+- **Graceful fallback** — if Speech permission is denied or the on-device model for the selected language isn't installed (System Settings › Keyboard › Dictation), the app falls back to the original frequency-based voice activation and says so in Settings. A clear script/language mismatch (an English script with 中文 tracking selected, or vice versa) is flagged in the reading view and Settings. You can also turn Word Tracking off entirely.
 
 Under the hood: a small Swift sidecar streams on-device partial transcripts to the app, and a forward-searching matcher aligns them against the tokenized script. Details in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) §3.1.
 

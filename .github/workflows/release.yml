@@ -30,28 +30,33 @@ jobs:
           draft: true
           prerelease: false
           body: |
-            ## Bilingual AI Teleprompter v1.0.0
+            ## Bilingual AI Teleprompter v1.1.0
 
-            First release of this fork of [openTeleprompt](https://github.com/ArunNGun/openTeleprompt) by [ArunNGun](https://github.com/ArunNGun) (MIT). All the upstream v3.0.0 goodness — the Dynamic Island notch overlay, voice-activated scrolling, rich-text script editor, script library, screen-share invisibility — plus two new headline features.
+            A UI and word-tracking polish release, shaped by real-world use on a MacBook Pro 14". Six areas of improvement over [v1.0.0](https://github.com/JackyJiang08/bilingual-ai-teleprompter/releases/tag/v1.0.0):
 
             ---
 
-            ### 🗣️ Word-level speech tracking (English + 中文)
+            ### 🎯 Smarter word tracking
 
-            Instead of scrolling at a fixed speed whenever it hears sound, the prompter now recognizes **what** you say — fully on-device via Apple's Speech framework — and follows your reading position word by word:
+            - **Script-biased recognition (macOS 14+):** each reading session builds a customized on-device language model from your script (Apple `SFCustomLanguageModelData`), so recognition is biased toward the exact words you're reading — the difference is largest for names and technical terms. Cached per script, rebuilt when you edit, and silently skipped on older systems or unsupported locales. Measured on a jargon-heavy test sentence: words recognized 10/18 → 13/18, p90 word-to-recognition latency 1428 ms → 792 ms ([methodology](https://github.com/JackyJiang08/bilingual-ai-teleprompter/blob/main/docs/ARCHITECTURE.md)).
+            - **The highlight keeps up with your voice:** scroll easing tightened (~280 ms → ~100 ms time constant) and the spoken-word fade halved (300 ms → 150 ms), so the current-word highlight reads as slightly ahead of you instead of trailing.
+            - **Clear language-mismatch warnings:** an English script with 中文 tracking selected (or the reverse) is now flagged in the reading view and Settings instead of silently stalling.
 
-            - Spoken text dims, your current word is highlighted, and the scroll is driven by where you actually are in the script.
-            - English and Mandarin, selectable in settings. Chinese is tracked per character (no spaces needed); mixed Chinese-English scripts work.
-            - Tolerates skipped words, fillers, and misreads — the cursor never jumps backward.
-            - 100% on-device: no audio or transcripts ever leave your Mac. Falls back to the classic frequency-based activation if Speech permission is denied or the language model isn't installed.
+            ### 🏝️ Pixel-perfect notch fit, on any Mac
 
-            ### ✦ Prepare with AI (optional)
+            The collapsed pill now measures the physical notch at runtime (NSScreen safe-area metrics) instead of using hardcoded values — exact width, position, and height on any notched MacBook at any display-scaling setting. Non-notch displays and classic mode are unchanged.
 
-            Paste a raw script — email draft, essay, speech, English or Chinese — and one click rewrites it into teleprompter form: short lines for the narrow notch panel, natural spoken phrasing, and `[PAUSE]` / `[SLOW]` / `[BREATHE]` cue markers at the right moments. Chinese lines break at natural prosodic boundaries.
+            ### 📝 A simpler editor
 
-            - Side-by-side review before anything is applied; your original is always kept.
-            - Bring your own Anthropic API key (stored in the macOS Keychain) **or** run fully offline against any OpenAI-compatible local server (e.g. Ollama).
-            - Completely optional and off by default — nothing is ever sent anywhere automatically.
+            One header row: close · script tabs (with a “+” tab for new scripts) · ✦ Prepare · Go · quit. The Save button is gone — edits autosave with a subtle “Saved” indicator (⌘S still saves on demand). Cue markers are one compact “+ Cue” menu and bold/colors live in a “⋯” menu, both in the footer. All the reclaimed space goes to your script text.
+
+            ### ✦ Guided AI setup
+
+            First click on ✦ Prepare now walks you through the one-time provider setup right in the editor — Claude API key (Keychain) or a local Ollama-compatible server — with a real “Test connection” check, then continues your original Prepare automatically. Already configured? Prepare runs immediately with a visible progress state.
+
+            ### 🌗 Theme-safe text and themed scrollbars
+
+            Script text defaults to white on dark / dark on light everywhere (editor and prompter), explicit colors that could vanish against a theme background are neutralized (including in previously saved scripts), and every scrollable view uses thin overlay-style scrollbars with no track background in both themes.
 
             ---
 
@@ -59,8 +64,8 @@ jobs:
 
             | Platform | File | Notes |
             |---|---|---|
-            | 🍎 Apple Silicon (M1–M4) | `Bilingual AI Teleprompter_1.0.0_aarch64.dmg` | macOS 13+ |
-            | 🍎 Intel Mac | `Bilingual AI Teleprompter_1.0.0_x64.dmg` | macOS 13+ |
+            | 🍎 Apple Silicon (M1–M4) | `Bilingual AI Teleprompter_1.1.0_aarch64.dmg` | macOS 13+ (script-biased recognition needs macOS 14+) |
+            | 🍎 Intel Mac | `Bilingual AI Teleprompter_1.1.0_x64.dmg` | macOS 13+ (script-biased recognition needs macOS 14+) |
 
             ### ⚠️ First launch
 

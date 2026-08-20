@@ -1,5 +1,70 @@
 # Changelog
 
+## v1.1.0 — 2026-08-20
+
+UI and word-tracking polish release, driven by real-world use on a
+MacBook Pro 14" (M4).
+
+### Word tracking
+
+- **Script-biased recognition (macOS 14+):** each reading session builds a
+  customized on-device language model from the current script
+  (`SFCustomLanguageModelData`, one phrase per line), cached per
+  (script, locale) hash and rebuilt on edit; the recognition session rotates
+  to the biased model once prepared, and unsupported systems/locales fall
+  back to the stock model silently. Measured on a jargon-heavy sentence:
+  words recognized 10/18 → 13/18, p90 word-to-recognition latency
+  1428 ms → 792 ms (methodology in `docs/ARCHITECTURE.md` §3.3)
+- Display-side responsiveness: scroll-easing time constant ~280 ms → ~100 ms,
+  spoken-word fade 300 ms → 150 ms — the next-expected-word highlight now
+  reads slightly ahead of the voice instead of trailing it
+- Latency instrumentation: sidecar messages carry timestamps, a deterministic
+  measurement harness (`scripts/track-latency.mjs` + sidecar `--audio-file`
+  mode) records partial cadence and spoken-word→partial latency; baseline on
+  an M4: partials every ~250 ms, word→partial p50 400 ms / p90 619 ms
+- Fixed: adopting the custom model mid-session could cascade a canceled
+  recognition task's error into a fatal `recognizer_storm`
+- Script/recognition language mismatches (English script with 中文 tracking,
+  or a mostly-Chinese script with English) are detected when reading starts
+  and surfaced in the reading view and the settings window
+- Dev-only tracking-quality overlay (`?trackdebug=1`): raw partials vs
+  matched position, LM state, confidence, partial age
+
+### UI
+
+- **Notch fit:** the collapsed pill now derives its exact width, height, and
+  x-position from the physical notch at runtime (NSScreen `safeAreaInsets` +
+  auxiliary top areas) instead of hardcoded values, correct on any model and
+  any display-scaling option; the expanded panel centers on the measured
+  notch. Non-notch displays and classic mode are unchanged
+- **Editor simplified around reading on camera:** single header row —
+  close · script switcher tabs (with a "+" tab replacing + New) ·
+  ✦ Prepare · Go · quit. Save button removed in favor of debounced autosave
+  with a subtle "Saved" indicator; ⌘S remains as a manual trigger. Cue
+  markers consolidated into one "+ Cue" insert menu and bold/color controls
+  into a "⋯" overflow menu, both in the footer; the freed rows go to script
+  text
+- **Guided AI setup:** the first ✦ Prepare click opens a one-time inline
+  setup explaining the two providers (Claude API key vs local Ollama), with
+  a real "Test connection" validation (new `ai_test` command), then
+  automatically continues the originally requested Prepare; with a provider
+  configured, Prepare runs immediately behind a visible progress overlay
+- **Theme-safe text colors:** script text defaults to the theme text color
+  in both the editor and the prompter; explicit white/black/transparent
+  color marks are neutralized at load and render time (healing legacy
+  scripts), and AI-prepared output inherits the default style — no
+  combination can render text invisible
+- **Scrollbars:** every scrollable view uses thin overlay-style scrollbars —
+  transparent track, subtle theme-tinted thumb — in both themes
+
+### Internals
+
+- 76 unit tests (was 58); visual golden coverage extended to 16 states
+  (AI setup panel) and stabilized (fonts-ready wait, deterministic
+  trackdemo scroll)
+- Dev/test hooks: `TELEPROMPTER_FAKE_NOTCH`, `?aisetup=1`, `?scrolldemo=1`,
+  `?trackdebug=1`, sidecar `--script` / `--audio-file`
+
 ## v1.0.0 — 2026-08-19
 
 First release of **Bilingual AI Teleprompter**, a fork of
