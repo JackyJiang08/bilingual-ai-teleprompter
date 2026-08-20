@@ -7,6 +7,7 @@ import { useAppStore } from '../store'
 import { API } from '../lib/api'
 import { mapAiError, preparedTextToDoc, prepareScript } from '../lib/ai'
 import { sanitizeDocColors } from '../lib/tokenizer'
+import AiSetupPanel from './AiSetupPanel'
 
 const COLORS = [
   { label: 'Yellow', value: '#facc15' },
@@ -42,6 +43,9 @@ export default function EditView() {
   const [aiBusy, setAiBusy] = useState(false)
   const [aiError, setAiError] = useState('')
   const [review, setReview] = useState(null) // { originalDoc, originalText, prepared }
+  // Guided one-time provider setup (?aisetup=1 is the snapshot demo hook)
+  const [setupOpen, setSetupOpen] = useState(() =>
+    new URLSearchParams(window.location.search).has('aisetup'))
 
   const autosaveTimer = useRef(null)
   const saveRef = useRef(() => {})
@@ -180,16 +184,13 @@ export default function EditView() {
   }
 
   // ── Prepare with AI ─────────────────────────────────────
-  async function handlePrepare() {
+  // The actual run, assuming a provider is configured on the Rust side.
+  // Called directly after guided setup completes so the originally requested
+  // Prepare continues without a second click.
+  async function runPrepare() {
     if (!editor || aiBusy) return
     const text = editor.getText().trim()
     if (!text) return
-    if (!config?.aiProvider) {
-      // No provider configured — open settings, which has setup instructions
-      setAiError('Set up an AI provider in Settings → Prepare with AI first.')
-      API.openSettings()
-      return
-    }
     setAiError('')
     setAiBusy(true)
     try {
@@ -198,10 +199,22 @@ export default function EditView() {
     } catch (e) {
       const mapped = mapAiError(e)
       setAiError(mapped.message)
-      if (mapped.needsSetup) API.openSettings()
+      // Missing key/model/provider → guided setup instead of raw settings
+      if (mapped.needsSetup) setSetupOpen(true)
     } finally {
       setAiBusy(false)
     }
+  }
+
+  function handlePrepare() {
+    if (!editor || aiBusy) return
+    if (!editor.getText().trim()) return
+    if (!config?.aiProvider) {
+      // First use: guided one-time setup; Prepare continues on success
+      setSetupOpen(true)
+      return
+    }
+    runPrepare()
   }
 
   function acceptReview() {
@@ -230,6 +243,16 @@ export default function EditView() {
   function setColor(color) {
     editor?.chain().focus().setColor(color).run()
     setOpenMenu(null)
+  }
+
+  // ── Guided AI setup (first Prepare click, or missing key/model) ──
+  if (setupOpen) {
+    return (
+      <AiSetupPanel
+        onCancel={() => setSetupOpen(false)}
+        onReady={() => { setSetupOpen(false); runPrepare() }}
+      />
+    )
   }
 
   // ── Review mode: side-by-side original vs prepared ──────
@@ -283,6 +306,14 @@ export default function EditView() {
       </div>
 
       {aiError && <div id="ai-error">{aiError}</div>}
+
+      {/* Visible progress while the provider prepares the script */}
+      {aiBusy && (
+        <div id="ai-progress" role="status">
+          <span className="ai-spinner" aria-hidden="true" />
+          Preparing your script…
+        </div>
+      )}
 
       {/* Editor */}
       <div className="tiptap-wrap">

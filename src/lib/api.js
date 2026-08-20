@@ -29,4 +29,6 @@ export const API = {
   onSpeechMsg: (cb) => tauriListen('speech-msg', (e) => cb(e.payload)),
   openSettings: () => tauriInvoke('open_settings'),
   aiComplete: (system, prompt) => tauriInvoke('ai_complete', { system, prompt }),
+  aiTest: (cfg) => tauriInvoke('ai_test', { cfg }),
+  setAiKey: (key) => tauriInvoke('set_ai_key', { key }),
 }

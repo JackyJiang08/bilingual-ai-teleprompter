@@ -851,6 +851,74 @@ async fn ai_complete(app: AppHandle, system: String, prompt: String) -> Result<S
     }
 }
 
+// Validates a candidate provider setup with a minimal request BEFORE it is
+// saved — backs the editor's guided onboarding ("Test connection"). Takes the
+// candidate values directly (not the stored config) so the user can test
+// exactly what they typed; an empty key falls back to the Keychain.
+#[tauri::command]
+async fn ai_test(cfg: serde_json::Value) -> Result<(), String> {
+    let provider  = cfg.get("provider").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let model     = cfg.get("model").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let local_url = cfg.get("localUrl").and_then(|v| v.as_str()).unwrap_or("http://localhost:11434").to_string();
+    let key       = cfg.get("key").and_then(|v| v.as_str()).unwrap_or("").to_string();
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|e| format!("network:{e}"))?;
+
+    async fn check(resp: reqwest::Response) -> Result<(), String> {
+        let status = resp.status().as_u16();
+        if status < 400 { return Ok(()); }
+        let retry_after = resp.headers().get("retry-after")
+            .and_then(|v| v.to_str().ok()).unwrap_or("").to_string();
+        let v: serde_json::Value = resp.json().await.unwrap_or_default();
+        Err(map_http_error(status, &retry_after, &v))
+    }
+
+    match provider.as_str() {
+        "anthropic" => {
+            let key = if key.is_empty() {
+                keyring_entry()?.get_password().map_err(|_| "no_api_key:No API key saved".to_string())?
+            } else { key };
+            let model = if model.is_empty() { "claude-opus-5".to_string() } else { model };
+            let body = serde_json::json!({
+                "model": model,
+                "max_tokens": 1,
+                "messages": [{ "role": "user", "content": "ping" }],
+            });
+            let resp = client
+                .post("https://api.anthropic.com/v1/messages")
+                .header("x-api-key", key)
+                .header("anthropic-version", "2023-06-01")
+                .json(&body)
+                .send()
+                .await
+                .map_err(|e| format!("network:{e}"))?;
+            check(resp).await
+        }
+        "local" => {
+            if model.is_empty() {
+                return Err("no_model:Enter a model name (e.g. llama3.1)".to_string());
+            }
+            let url = format!("{}/v1/chat/completions", local_url.trim_end_matches('/'));
+            let body = serde_json::json!({
+                "model": model,
+                "max_tokens": 1,
+                "messages": [{ "role": "user", "content": "ping" }],
+            });
+            let resp = client
+                .post(&url)
+                .json(&body)
+                .send()
+                .await
+                .map_err(|e| format!("network:{e}"))?;
+            check(resp).await
+        }
+        _ => Err("no_provider:No AI provider selected".to_string()),
+    }
+}
+
 // ── Window creation ────────────────────────────────────────
 
 fn create_prompter_window(app: &AppHandle) {
@@ -1015,7 +1083,7 @@ pub fn run() {
             open_url, open_settings,
             focus_prompter, elevate_notch_window,
             start_speech, stop_speech, get_speech_status,
-            ai_complete, set_ai_key, has_ai_key,
+            ai_complete, ai_test, set_ai_key, has_ai_key,
         ])
         .setup(|app| {
             let app_handle = app.handle().clone();

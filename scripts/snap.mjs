@@ -34,6 +34,8 @@ const STATES = [
   { name: 'idle-hover', view: 'idle', theme: 'light', params: 'hoverdemo=1' },
   { name: 'edit-aireview', view: 'edit', theme: 'dark', params: 'aireview=1' },
   { name: 'edit-aireview', view: 'edit', theme: 'light', params: 'aireview=1' },
+  { name: 'edit-aisetup', view: 'edit', theme: 'dark', params: 'aisetup=1' },
+  { name: 'edit-aisetup', view: 'edit', theme: 'light', params: 'aisetup=1' },
   { name: 'read-tracking', view: 'read', theme: 'dark', params: 'trackdemo=1' },
   { name: 'read-tracking', view: 'read', theme: 'light', params: 'trackdemo=1' },
   // Settings window (its own page/bundle; selector is the settings panel)

@@ -111,3 +111,56 @@ describe('footer menus', () => {
     expect(menu.querySelectorAll('.tb-color').length).toBeGreaterThanOrEqual(4)
   })
 })
+
+describe('Prepare with AI onboarding', () => {
+  it('first Prepare click with no provider opens the guided setup panel', async () => {
+    seedScript()
+    useAppStore.setState({ config: { ...useAppStore.getState().config, aiProvider: '' } })
+    const { container } = render(<EditView />)
+    const prepare = [...container.querySelectorAll('.pill-btn')].find(b => b.textContent === '✦ Prepare')
+    await act(async () => { fireEvent.click(prepare) })
+    expect(container.querySelector('#ai-setup')).toBeTruthy()
+    // both provider options are explained
+    const cards = [...container.querySelectorAll('.setup-card-title')].map(e => e.textContent)
+    expect(cards).toEqual(['Claude API', 'Local (Ollama)'])
+    expect([...container.querySelectorAll('.setup-actions .pill-btn')][0].textContent).toBe('Test connection')
+  })
+
+  it('successful test saves the provider and auto-continues the Prepare', async () => {
+    seedScript()
+    useAppStore.setState({ config: { ...useAppStore.getState().config, aiProvider: '' } })
+    invoke.mockImplementation((cmd) => {
+      if (cmd === 'ai_test') return Promise.resolve(null)
+      if (cmd === 'ai_complete') return Promise.resolve('prepared line')
+      return Promise.resolve(null)
+    })
+    const { container } = render(<EditView />)
+    const prepare = [...container.querySelectorAll('.pill-btn')].find(b => b.textContent === '✦ Prepare')
+    await act(async () => { fireEvent.click(prepare) })
+    const key = container.querySelector('input[type="password"]')
+    fireEvent.change(key, { target: { value: 'sk-ant-test' } })
+    const testBtn = [...container.querySelectorAll('.setup-actions .pill-btn')][0]
+    await act(async () => { fireEvent.click(testBtn) })
+    expect(invoke).toHaveBeenCalledWith('ai_test', expect.anything())
+    expect(invoke).toHaveBeenCalledWith('set_ai_key', { key: 'sk-ant-test' })
+    expect(invoke).toHaveBeenCalledWith('set_config', expect.objectContaining({ patch: expect.objectContaining({ aiProvider: 'anthropic' }) }))
+    // the original Prepare continued without a second Prepare click
+    expect(invoke).toHaveBeenCalledWith('ai_complete', expect.anything())
+  })
+
+  it('configured provider runs Prepare immediately with a visible progress state', async () => {
+    seedScript()
+    useAppStore.setState({ config: { ...useAppStore.getState().config, aiProvider: 'anthropic' } })
+    let resolveComplete
+    invoke.mockImplementation((cmd) => {
+      if (cmd === 'ai_complete') return new Promise(r => { resolveComplete = r })
+      return Promise.resolve(null)
+    })
+    const { container } = render(<EditView />)
+    const prepare = [...container.querySelectorAll('.pill-btn')].find(b => b.textContent === '✦ Prepare')
+    await act(async () => { fireEvent.click(prepare) })
+    expect(container.querySelector('#ai-setup')).toBeNull()
+    expect(container.querySelector('#ai-progress')).toBeTruthy()
+    await act(async () => { resolveComplete('done line') })
+  })
+})
