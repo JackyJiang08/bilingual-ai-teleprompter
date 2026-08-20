@@ -3,13 +3,17 @@ import { tokenizeDoc } from '../lib/tokenizer'
 import { useAppStore } from '../store'
 import { API } from '../lib/api'
 import { createMicEngine, SPEEDS, SCROLL_SPEED_BASE } from '../lib/mic'
-import { createSpeechTracker } from '../lib/speech'
+import { createSpeechTracker, languageMismatchMessage } from '../lib/speech'
 
 // When word tracking drives the scroll, the current word is eased toward
 // this fraction of the viewport height (the "reading line").
 const READING_LINE = 0.35
-// Per-16.7ms-frame smoothing factor for cursor-following scroll.
-const FOLLOW_SMOOTHING = 0.06
+// Per-16.7ms-frame smoothing factor for cursor-following scroll. 0.16 ≈
+// a ~100ms time constant: recognition partials arrive ~every 250ms, so the
+// scroll settles well before the next partial and the highlight (which marks
+// the next *expected* word) reads as slightly ahead of the voice instead of
+// dragging behind it (was 0.06 ≈ 280ms — visibly trailing).
+const FOLLOW_SMOOTHING = 0.16
 
 export default function ReadView() {
   const { scriptText, scriptDoc, config, setView, setRecognition } = useAppStore()
@@ -29,6 +33,10 @@ export default function ReadView() {
   const [micStatus, setMicStatus] = useState('Waiting…')
   // Word-tracking cursor for rendering: active + token index of next expected word
   const [track, setTrack] = useState({ active: false, cursor: -1, done: false })
+  // Dev-only tracking-quality overlay (?trackdebug=1): raw partials vs
+  // matched position, for debugging recognition/matcher behavior
+  const trackDebug = new URLSearchParams(window.location.search).has('trackdebug')
+  const [debug, setDebug] = useState(null)
 
   // Refs for values used inside RAF/interval (must not be stale)
   const isPausedRef = useRef(false)
@@ -79,6 +87,14 @@ export default function ReadView() {
     const tracker = createSpeechTracker({
       locale: configRef.current.speechLang || 'en-US',
       tokens,
+      scriptText,
+      onDebug: trackDebug ? (msg) => {
+        if (msg.type === 'partial' || msg.type === 'final') {
+          setDebug(d => ({ ...d, text: msg.text, session: msg.session, confidence: msg.confidence, at: Date.now(), emitted: msg.t }))
+        } else if (msg.type === 'lm') {
+          setDebug(d => ({ ...d, lm: msg.state }))
+        }
+      } : undefined,
       onUpdate: (pos) => {
         setTrackBoth({ active: true, cursor: pos.cursorTokenIndex, done: pos.done })
         isSpeakingRef.current = pos.speaking
@@ -222,6 +238,16 @@ export default function ReadView() {
     }
     rafRef.current = requestAnimationFrame(loop)
 
+    // Language sanity check: a clear script/recognition-language mismatch
+    // stalls tracking silently, so surface it here and in Settings. The
+    // empty-string call clears a stale notice.
+    const wantSpeechEarly = configRef.current.wordTracking !== false && !!window.__TAURI__
+    if (wantSpeechEarly) {
+      const mismatch = languageMismatchMessage(scriptText, configRef.current.speechLang || 'en-US')
+      API.setSpeechNotice(mismatch)
+      if (mismatch) setMicStatus('Language mismatch — see Settings')
+    }
+
     // Start recognition: word tracking when enabled (and running inside
     // Tauri), otherwise the frequency-based VAD engine
     const wantSpeech = configRef.current.wordTracking !== false && !!window.__TAURI__
@@ -360,6 +386,19 @@ export default function ReadView() {
           }) : scriptText}
         </div>
       </div>
+
+      {trackDebug && (
+        <div id="track-debug">
+          <div>engine: speech · session {debug?.session ?? '–'} · lm: {debug?.lm ?? 'stock'}</div>
+          <div>raw: {(debug?.text || '').slice(-64) || '–'}</div>
+          <div>
+            cursor {track.cursor} / matched {useAppStore.getState().recognition.matchedCount}
+            /{useAppStore.getState().recognition.total}
+            {' · conf '}{(debug?.confidence ?? 0).toFixed(2)}
+            {debug?.at ? ` · ${Date.now() - debug.at}ms ago` : ''}
+          </div>
+        </div>
+      )}
 
       <div id="read-controls">
         <div className="ctrl-left">

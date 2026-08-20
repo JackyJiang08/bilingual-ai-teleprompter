@@ -20,7 +20,7 @@ On a normal launch exactly two things appear: the notch pill (the `prompter` win
 
 In addition to the windows there is one supervised child process: **`speech-sidecar`**, a Swift binary (source `src-tauri/sidecar/speech-sidecar.swift`, bundled via `externalBin` in `tauri.conf.json`) that runs Apple's `SFSpeechRecognizer` fully on-device and streams partial transcripts to the app — see §3.1.
 
-Entry point: `src-tauri/src/main.rs:4-6` calls `open_teleprompter_lib::run()`, which registers four plugins — `tauri_plugin_global_shortcut`, `tauri_plugin_fs`, `tauri_plugin_shell`, `tauri_plugin_positioner` — installs `AppState`, registers 24 commands, and builds the tray + global shortcuts in `setup()`.
+Entry point: `src-tauri/src/main.rs:4-6` calls `open_teleprompter_lib::run()`, which registers four plugins — `tauri_plugin_global_shortcut`, `tauri_plugin_fs`, `tauri_plugin_shell`, `tauri_plugin_positioner` — installs `AppState`, registers the invoke handlers, and builds the tray + global shortcuts in `setup()`.
 
 The two React windows are separate Vite entry points, declared in `vite.config.js:14-17` (`rollupOptions.input: { main: 'index.html', settings: 'settings.html' }`). They do **not** share JS state; they synchronize only through the Rust backend (see §1.3).
 
@@ -33,7 +33,7 @@ The two React windows are separate Vite entry points, declared in `vite.config.j
 
 Direction of traffic:
 
-- **JS → Rust (commands):** the 26 handlers registered in `run()` (`get_config`, `set_config`, `switch_mode`, `get_scripts`, `save_scripts`, `set_ignore_mouse`, `resize_prompter`, `toggle_prompter`, `resize_settings`, `quit_app`, `open_devtools`, `hide_settings`, `start_drag`, `set_movable`, `move_window`, `get_window_pos`, `open_url`, `open_settings`, `focus_prompter`, `elevate_notch_window`, `start_speech`, `stop_speech`, `get_speech_status`, `ai_complete`, `set_ai_key`, `has_ai_key`).
+- **JS → Rust (commands):** the 30 handlers registered in `run()` (`get_config`, `set_config`, `switch_mode`, `get_notch_metrics`, `get_scripts`, `save_scripts`, `set_ignore_mouse`, `resize_prompter`, `toggle_prompter`, `resize_settings`, `quit_app`, `open_devtools`, `hide_settings`, `start_drag`, `set_movable`, `move_window`, `get_window_pos`, `open_url`, `open_settings`, `focus_prompter`, `elevate_notch_window`, `start_speech`, `stop_speech`, `get_speech_status`, `set_speech_notice`, `get_speech_notice`, `ai_complete`, `ai_test`, `set_ai_key`, `has_ai_key`).
 - **Rust → JS (events):** three event names.
   - `config-update` — broadcast by `set_config`; consumed by `App.jsx` (which normalizes snake_case→camelCase) and `SettingsView.jsx`.
   - `shortcut` — emitted to the `prompter` window with a string payload `"pause" | "faster" | "slower" | "reset"` from the global-shortcut handler, and `"stop"` from `switch_mode` and `toggle_prompter`; consumed in `ReadView.jsx`.
@@ -112,9 +112,9 @@ Two pipelines can drive the prompter while reading:
 
 **Process.** `src-tauri/sidecar/speech-sidecar.swift` is a standalone Swift binary compiled by `scripts/build-sidecar.sh` into `src-tauri/binaries/speech-sidecar-<target-triple>` (gitignored; built automatically by `beforeDevCommand`/`beforeBuildCommand`) and bundled through `externalBin`. It runs `SFSpeechRecognizer` with `requiresOnDeviceRecognition = true`, `shouldReportPartialResults = true`, `taskHint = .dictation`, and `addsPunctuation = false`, fed by an `AVAudioEngine` input tap. **All recognition is on-device; nothing leaves the machine** — the binary's only output channel is NDJSON on stdout to the parent app. It refuses to run at all (fatal `ondevice_unsupported`) if the selected locale's on-device model is missing.
 
-**Protocol** (one JSON object per stdout line): `ready {locale, onDevice}`, `partial`/`final {session, text, confidence}` (confidence = mean of `SFTranscriptionSegment` confidences), and `error {code, message, fatal}`. Recognition tasks are rotated on final results and recoverable errors — each rotation increments `session`, and each session's transcript starts empty. Fatal codes: `auth_denied`, `auth_restricted`, `locale_unavailable`, `ondevice_unsupported`, `audio_error`, `recognizer_storm` (three failures within 2 s of session start).
+**Protocol** (one JSON object per stdout line, every message stamped with `t` = ms since epoch): `ready {locale, onDevice}`, `partial`/`final {session, text, confidence}` (confidence = mean of `SFTranscriptionSegment` confidences), `lm {state}` (customized language model lifecycle, §3.3), `feed {state}` (measurement mode only), and `error {code, message, fatal}`. Emission is unbuffered — each line is one direct `write(2)`, so partials reach the parent the moment the recognizer produces them. Recognition tasks are rotated on final results and recoverable errors — each rotation increments `session`, each session's transcript starts empty, and errors reported by an already-rotated (canceled) session are ignored so a rotation can never cascade into more rotations. Fatal codes: `auth_denied`, `auth_restricted`, `locale_unavailable`, `ondevice_unsupported`, `audio_error`, `recognizer_storm` (three failures within 2 s of session start). Args: `--locale <id>`, `--script <path>` (script text for the customized LM, §3.3), `--audio-file <path>` (dev/measurement: feed a file at real-time pace instead of the mic).
 
-**Supervision (Rust).** `start_speech(locale)` in `src-tauri/src/lib.rs` kills any previous instance, spawns the sidecar via `tauri_plugin_shell`'s `sidecar()`, and pumps its stdout: every parsed line is broadcast to all windows as a `speech-msg` event; `ready`/`error` lines are also stored in `AppState.speech_status` so the settings window can query the latest state via `get_speech_status` after the fact. Process exit surfaces as a synthetic `{"type":"terminated","code"}` message. `stop_speech` kills the child; the `RunEvent::Exit` handler guarantees the sidecar never outlives the app. Rust makes no policy decisions — restart and fallback logic live in the frontend.
+**Supervision (Rust).** `start_speech(locale, script_text)` in `src-tauri/src/lib.rs` kills any previous instance (script text is written to a temp file and forwarded as `--script` for the customized LM, §3.3), spawns the sidecar via `tauri_plugin_shell`'s `sidecar()`, and pumps its stdout: every parsed line is broadcast to all windows as a `speech-msg` event; `ready`/`error` lines are also stored in `AppState.speech_status` so the settings window can query the latest state via `get_speech_status` after the fact. Process exit surfaces as a synthetic `{"type":"terminated","code"}` message. `stop_speech` kills the child; the `RunEvent::Exit` handler guarantees the sidecar never outlives the app. Rust makes no policy decisions — restart and fallback logic live in the frontend.
 
 **Matching (JS).** `src/lib/matcher.js` implements the forward-searching cursor:
 
@@ -157,6 +157,65 @@ scriptTextRef.current.style.transform = translateY(-scrollPos)
 ```
 
 with `paused = isPausedRef || isHoverPausedRef` gating both branches. Scroll position is a ref (`scrollPosRef`), applied as a CSS transform — it never touches React state or the Zustand store (the `recognition` slice is updated from speech-tracking callbacks, not from the RAF loop). As noted in §1.3, the older Zustand playback flags are dead; Zustand's real responsibilities in read mode are `scriptText`/`scriptDoc` (input), `recognition` (output for other views), and `setView` (exit). Cue markers (`[PAUSE]`, `[BREATHE]`, `[SLOW]`) fire when their DOM element enters the top 40 % of the viewport (`checkMarkers`), driving timed pauses or a speed step-down. Manual wheel scrubbing writes the same `scrollPosRef`.
+
+### 3.3 Tracking latency and the customized language model
+
+**Instrumentation.** `scripts/track-latency.mjs` measures the recognition
+pipeline deterministically: it renders a known sentence with macOS TTS
+(`say -o`), then runs the sidecar in `--audio-file` mode, which streams that
+file into the recognizer at real-time pace exactly as if it were live mic
+input (no speakers/microphone involved, so runs are reproducible). Exact feed
+start/end times come from the sidecar's `feed` events; per-word spoken times
+are estimated by linear interpolation across the utterance. `TL_SENTENCE`
+overrides the sentence; `TL_BIAS=1` additionally passes it as `--script` for
+A/B comparisons of the customized language model.
+
+**Baseline (2026-08-19, MacBook Pro M4, macOS 15.6, en-US on-device model,
+19-word common-vocabulary sentence at 170 wpm):**
+
+| metric | p50 | p90 | mean |
+|---|---|---|---|
+| partial cadence (inter-partial gap) | 249 ms | 303 ms | 238 ms |
+| spoken word → partial containing it | 400 ms | 619 ms | 413 ms |
+
+The cadence is recognizer-bound (Apple emits partials roughly every 250 ms);
+our transport adds ~1 ms (unbuffered NDJSON → Tauri event) and the matcher
+runs in microseconds on every partial, so end-to-end spoken-word → highlight
+is recognition latency + at most one animation frame. What users perceived as
+lag was mostly on the display side and is tuned in this fork: scroll-easing
+time constant cut from ~280 ms to ~100 ms (`FOLLOW_SMOOTHING` 0.06 → 0.16)
+and the spoken-token fade from 300 ms to 150 ms — the highlight marks the
+next *expected* word, so with a fast-settling scroll it reads as slightly
+ahead of the voice rather than trailing it.
+
+**Customized language model (macOS 14+).** At session start the sidecar
+builds an `SFCustomLanguageModelData` from the current script (one
+`PhraseCount` per line, ≤500 lines, count 10), exports it to
+`~/Library/Caches/bilingual-teleprompter-lm/<sha256(script|locale)>.bin`, and
+prepares it via `SFSpeechLanguageModel.prepareCustomLanguageModel`. The
+exported asset is cached per (script, locale) hash — edits change the hash
+and force a rebuild. Preparation is asynchronous: early sessions run the
+stock model, and the pipeline rotates to the biased one when ready
+(`lm {state:"active"}`; typically ≈1 s when cached). Any failure — macOS 13,
+unsupported locale, training error — emits `lm {state:"unavailable"}` and
+recognition continues on the stock model, silently. Measured effect on a
+jargon-heavy sentence ("Tauri… NDJSON… WKWebView… Anthropic… Yuqing…",
+`TL_BIAS=1` vs without): words recognized 10/18 → **13/18**, and
+spoken-word→partial p90 1428 ms → **792 ms** (the biased model commits to
+hard words much sooner). Common-vocabulary sentences are unaffected.
+
+**Debug overlay.** `?trackdebug=1` (dev-only, via the snapshot harness or
+`TELEPROMPTER_DEMO_PARAMS`) renders an overlay in read mode showing the raw
+partial tail, session number, LM state, matched/total counts, confidence,
+and the age of the last partial — for eyeballing raw recognition against the
+matcher's position.
+
+**Language mismatch.** A clear script/locale mismatch (English script with
+中文 tracking, or a mostly-Chinese script with English tracking) would stall
+the cursor silently; `languageMismatchMessage` (src/lib/speech.js) detects it
+when reading starts, shows it in the read-mode status line, and pushes it to
+the settings window via `set_speech_notice`/`speech-notice`. Mixed-language
+scripts are fine and produce no warning.
 
 ---
 

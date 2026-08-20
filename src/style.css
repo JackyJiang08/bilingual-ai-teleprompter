@@ -527,8 +527,9 @@ body.mode-classic .idle-quit { opacity: 1; }
   font-weight: 500; line-height: 1.6;
   color: var(--script-text); will-change: transform;
 }
-/* Word-tracking token states (speech recognition mode) */
-#script-text .tok { transition: opacity 0.3s ease; }
+/* Word-tracking token states (speech recognition mode) — fast fade so the
+   spoken/current transition doesn't visually trail the voice */
+#script-text .tok { transition: opacity 0.15s ease; }
 #script-text .tok-spoken { opacity: 0.35; }
 #script-text .tok-current {
   text-decoration: underline;
@@ -537,6 +538,19 @@ body.mode-classic .idle-quit { opacity: 1; }
   text-underline-offset: 3px;
 }
 .read-marker.tok-spoken { opacity: 0.35; }
+
+/* Dev-only tracking-quality overlay (?trackdebug=1) */
+#track-debug {
+  position: absolute; left: 8px; right: 8px; bottom: 40px; z-index: 40;
+  padding: 5px 8px;
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  font-family: 'DM Mono', monospace; font-size: 8.5px; line-height: 1.5;
+  color: var(--text-secondary);
+  pointer-events: none;
+  white-space: nowrap; overflow: hidden;
+}
 
 /* ── Prepare with AI ── */
 /* Progress overlay while the provider runs */

@@ -22,14 +22,20 @@
 // parent app; recognition is forced on-device.
 
 import AVFoundation
+import CryptoKit
 import Foundation
 import Speech
 
 // ── stdout emitter ─────────────────────────────────────────
+// FileHandle.write is a direct write(2) per NDJSON line — no stdio buffering,
+// so each partial reaches the parent the moment it is emitted. Every message
+// carries "t" (ms since epoch) for latency instrumentation.
 let emitQueue = DispatchQueue(label: "emit")
 func emit(_ obj: [String: Any]) {
     emitQueue.sync {
-        guard let data = try? JSONSerialization.data(withJSONObject: obj) else { return }
+        var stamped = obj
+        stamped["t"] = Int(Date().timeIntervalSince1970 * 1000)
+        guard let data = try? JSONSerialization.data(withJSONObject: stamped) else { return }
         FileHandle.standardOutput.write(data)
         FileHandle.standardOutput.write(Data([0x0A]))
     }
@@ -41,10 +47,23 @@ func fatalError(code: String, message: String) -> Never {
 }
 
 // ── args ───────────────────────────────────────────────────
+// --locale <id>       recognition locale (default en-US)
+// --script <path>     file holding the script text being read; used to build
+//                     a customized language model (macOS 14+) that biases
+//                     recognition toward the exact words on screen. Silently
+//                     ignored when unsupported.
+// --audio-file <path> dev/measurement only: feed this audio file to the
+//                     recognizer at real-time pace instead of the microphone
+//                     (used by scripts/track-latency.mjs for deterministic
+//                     latency numbers; never set by the app)
 var localeId = "en-US"
+var audioFilePath: String? = nil
+var scriptFilePath: String? = nil
 var args = CommandLine.arguments.dropFirst().makeIterator()
 while let a = args.next() {
     if a == "--locale", let v = args.next() { localeId = v }
+    if a == "--script", let v = args.next() { scriptFilePath = v }
+    if a == "--audio-file", let v = args.next() { audioFilePath = v }
 }
 
 // ── authorization ──────────────────────────────────────────
@@ -102,6 +121,42 @@ final class Pipeline: NSObject {
         try engine.start()
     }
 
+    // Measurement mode: stream an audio file into the recognizer at
+    // real-time pace, as if it were live microphone input.
+    func startFileFeed(path: String) throws {
+        let file = try AVAudioFile(forReading: URL(fileURLWithPath: path))
+        let format = file.processingFormat
+        let chunk: AVAudioFrameCount = 1024
+        Thread.detachNewThread { [weak self] in
+            emit(["type": "feed", "state": "start", "frames": Int(file.length),
+                  "sampleRate": format.sampleRate])
+            while let self = self, file.framePosition < file.length {
+                guard let buf = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: chunk) else { break }
+                do { try file.read(into: buf, frameCount: chunk) } catch { break }
+                if buf.frameLength == 0 { break }
+                self.lock.lock()
+                let req = self.request
+                self.lock.unlock()
+                req?.append(buf)
+                // pace to real time
+                Thread.sleep(forTimeInterval: Double(buf.frameLength) / format.sampleRate)
+            }
+            emit(["type": "feed", "state": "end"])
+        }
+    }
+
+    // Customized language model configuration (SFSpeechLanguageModel.
+    // Configuration on macOS 14+; stored as Any so the class loads on 13).
+    var customLM: Any? = nil
+
+    func adoptCustomLM(_ config: Any) {
+        lock.lock()
+        customLM = config
+        lock.unlock()
+        // Rotate so the next session picks up the biased model
+        rotateSession()
+    }
+
     func startSession() {
         let req = SFSpeechAudioBufferRecognitionRequest()
         req.shouldReportPartialResults = true
@@ -109,6 +164,12 @@ final class Pipeline: NSObject {
         req.taskHint = .dictation
         if #available(macOS 13.0, *) {
             req.addsPunctuation = false
+        }
+        if #available(macOS 14.0, *) {
+            lock.lock()
+            let lm = customLM as? SFSpeechLanguageModel.Configuration
+            lock.unlock()
+            if let lm = lm { req.customizedLanguageModel = lm }
         }
         lock.lock()
         request = req
@@ -131,6 +192,11 @@ final class Pipeline: NSObject {
                     emit(["type": "partial", "session": current, "text": text, "confidence": confidence])
                 }
             } else if let error = error {
+                // A canceled task (session already rotated, e.g. when the
+                // custom LM is adopted) reports a final error — ignore it,
+                // or it would re-rotate the live session and cascade into a
+                // recognizer_storm.
+                if current != self.session { return }
                 let elapsed = Date().timeIntervalSince(self.sessionStart)
                 if elapsed < 2.0 {
                     self.quickFailures += 1
@@ -148,7 +214,7 @@ final class Pipeline: NSObject {
         }
     }
 
-    private func rotateSession() {
+    func rotateSession() {
         lock.lock()
         request?.endAudio()
         request = nil
@@ -165,13 +231,78 @@ final class Pipeline: NSObject {
 
 let pipeline = Pipeline(recognizer: recognizer)
 do {
-    try pipeline.startAudio()
+    if let path = audioFilePath {
+        pipeline.startSession()
+        try pipeline.startFileFeed(path: path)
+    } else {
+        try pipeline.startAudio()
+        pipeline.startSession()
+    }
 } catch {
     fatalError(code: "audio_error", message: "Could not start audio capture: \(error.localizedDescription)")
 }
-pipeline.startSession()
 
 emit(["type": "ready", "locale": localeId, "onDevice": true])
+
+// ── Customized language model (macOS 14+) ──────────────────
+// Biases on-device recognition toward the exact words of the current script
+// — the biggest accuracy lever for names and technical terms. Built from the
+// script text, cached per (script, locale) hash, prepared asynchronously so
+// early sessions run on the stock model and rotate to the biased one when
+// ready. Any failure (older macOS, unsupported locale, training error) is
+// silent: recognition simply continues on the stock model.
+@available(macOS 14.0, *)
+func buildCustomLM(scriptText: String, pipeline: Pipeline) async {
+    do {
+        let digest = SHA256.hash(data: Data((scriptText + "|" + localeId).utf8))
+        let hash = digest.map { String(format: "%02x", $0) }.joined().prefix(16)
+        let cacheDir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("bilingual-teleprompter-lm", isDirectory: true)
+        try FileManager.default.createDirectory(at: cacheDir, withIntermediateDirectories: true)
+        let assetURL = cacheDir.appendingPathComponent("\(hash).bin")
+        let lmURL = cacheDir.appendingPathComponent("\(hash).lm", isDirectory: true)
+
+        if !FileManager.default.fileExists(atPath: assetURL.path) {
+            // One phrase per script line (edits change the hash → rebuild)
+            let phrases = scriptText
+                .components(separatedBy: .newlines)
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty }
+                .prefix(500)
+            let data = SFCustomLanguageModelData(
+                locale: Locale(identifier: localeId),
+                identifier: "com.jackyjiang.bilingual-teleprompter.script",
+                version: "1.0"
+            ) {
+                for phrase in phrases {
+                    SFCustomLanguageModelData.PhraseCount(phrase: String(phrase), count: 10)
+                }
+            }
+            try await data.export(to: assetURL)
+        }
+
+        let config = SFSpeechLanguageModel.Configuration(languageModel: lmURL)
+        try await SFSpeechLanguageModel.prepareCustomLanguageModel(
+            for: assetURL,
+            clientIdentifier: "com.jackyjiang.bilingual-teleprompter",
+            configuration: config
+        )
+        pipeline.adoptCustomLM(config)
+        emit(["type": "lm", "state": "active", "cached": true])
+    } catch {
+        emit(["type": "lm", "state": "unavailable", "message": error.localizedDescription])
+    }
+}
+
+if let path = scriptFilePath,
+   let scriptText = try? String(contentsOfFile: path, encoding: .utf8),
+   !scriptText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+    if #available(macOS 14.0, *) {
+        Task { await buildCustomLM(scriptText: scriptText, pipeline: pipeline) }
+    } else {
+        emit(["type": "lm", "state": "unavailable", "message": "requires macOS 14"])
+    }
+}
 
 signal(SIGINT) { _ in exit(0) }
 signal(SIGTERM) { _ in exit(0) }

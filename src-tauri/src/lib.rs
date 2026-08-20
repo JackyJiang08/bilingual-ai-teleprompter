@@ -205,6 +205,7 @@ pub struct AppState {
     classic_pos:   Mutex<Option<(f64, f64)>>,
     speech_child:  Mutex<Option<tauri_plugin_shell::process::CommandChild>>,
     speech_status: Mutex<serde_json::Value>,
+    speech_notice: Mutex<String>,
 }
 
 // ── File paths ─────────────────────────────────────────────
@@ -613,7 +614,12 @@ fn kill_speech_child(state: &AppState) {
 }
 
 #[tauri::command]
-fn start_speech(app: AppHandle, state: State<AppState>, locale: String) -> Result<(), String> {
+fn start_speech(
+    app: AppHandle,
+    state: State<AppState>,
+    locale: String,
+    script_text: Option<String>,
+) -> Result<(), String> {
     use tauri_plugin_shell::process::CommandEvent;
     use tauri_plugin_shell::ShellExt;
 
@@ -621,11 +627,23 @@ fn start_speech(app: AppHandle, state: State<AppState>, locale: String) -> Resul
     *state.speech_status.lock().unwrap() =
         serde_json::json!({ "type": "starting", "locale": locale });
 
+    // Script text feeds the sidecar's customized language model (macOS 14+),
+    // biasing recognition toward the words being read. Passed via file to
+    // avoid argv limits; the sidecar ignores it when unsupported.
+    let mut args = vec!["--locale".to_string(), locale.clone()];
+    if let Some(text) = script_text.filter(|t| !t.trim().is_empty()) {
+        let path = std::env::temp_dir().join("bilingual-teleprompter-script.txt");
+        if fs::write(&path, text).is_ok() {
+            args.push("--script".to_string());
+            args.push(path.to_string_lossy().to_string());
+        }
+    }
+
     let (mut rx, child) = app
         .shell()
         .sidecar("speech-sidecar")
         .map_err(|e| e.to_string())?
-        .args(["--locale", &locale])
+        .args(&args)
         .spawn()
         .map_err(|e| e.to_string())?;
     *state.speech_child.lock().unwrap() = Some(child);
@@ -679,6 +697,19 @@ fn start_speech(app: AppHandle, state: State<AppState>, locale: String) -> Resul
 fn stop_speech(state: State<AppState>) {
     kill_speech_child(&state);
     *state.speech_status.lock().unwrap() = serde_json::json!({ "type": "stopped" });
+}
+
+// Advisory notice from the prompter (e.g. script/recognition language
+// mismatch) surfaced in the settings window. Empty string clears it.
+#[tauri::command]
+fn set_speech_notice(app: AppHandle, state: State<AppState>, message: String) {
+    *state.speech_notice.lock().unwrap() = message.clone();
+    let _ = app.emit("speech-notice", message);
+}
+
+#[tauri::command]
+fn get_speech_notice(state: State<AppState>) -> String {
+    state.speech_notice.lock().unwrap().clone()
 }
 
 #[tauri::command]
@@ -1064,6 +1095,7 @@ pub fn run() {
         classic_pos:   Mutex::new(None),
         speech_child:  Mutex::new(None),
         speech_status: Mutex::new(serde_json::json!({ "type": "stopped" })),
+        speech_notice: Mutex::new(String::new()),
     };
 
     tauri::Builder::default()
@@ -1083,6 +1115,7 @@ pub fn run() {
             open_url, open_settings,
             focus_prompter, elevate_notch_window,
             start_speech, stop_speech, get_speech_status,
+            set_speech_notice, get_speech_notice,
             ai_complete, ai_test, set_ai_key, has_ai_key,
         ])
         .setup(|app| {

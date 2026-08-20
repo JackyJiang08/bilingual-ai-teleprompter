@@ -15,6 +15,8 @@ const API = {
   hideSettings:   () => tauriInvoke('hide_settings'),
   getSpeechStatus:() => tauriInvoke('get_speech_status'),
   onSpeechMsg:    (cb) => tauriListen('speech-msg', (e) => cb(e.payload)),
+  getSpeechNotice:() => tauriInvoke('get_speech_notice'),
+  onSpeechNotice: (cb) => tauriListen('speech-notice', (e) => cb(e.payload)),
   setAiKey:       (key) => tauriInvoke('set_ai_key', { key }),
   hasAiKey:       () => tauriInvoke('has_ai_key'),
 }
@@ -64,6 +66,7 @@ export default function SettingsView() {
   const [wordTracking, setWordTracking] = useState(true)
   const [speechLang, setSpeechLang] = useState('en-US')
   const [speechStatus, setSpeechStatus] = useState(null)
+  const [speechNotice, setSpeechNotice] = useState('')
   const [aiProvider, setAiProvider] = useState('')
   const [aiModel, setAiModel] = useState('')
   const [aiLocalUrl, setAiLocalUrl] = useState('http://localhost:11434')
@@ -111,6 +114,9 @@ export default function SettingsView() {
     // Speech engine status — initial value plus live updates (state changes
     // only; partial transcripts are not status)
     API.getSpeechStatus().then(v => { if (v) setSpeechStatus(v) })
+    // Prompter-side advisory (script/recognition language mismatch)
+    API.getSpeechNotice().then(v => setSpeechNotice(v || ''))
+    API.onSpeechNotice(v => setSpeechNotice(v || ''))
     API.hasAiKey().then(v => setHasAiKey(!!v))
     API.onSpeechMsg(v => {
       if (!v || !v.type) return
@@ -346,6 +352,11 @@ export default function SettingsView() {
                 ))}
               </div>
             </Row>
+            {speechNotice && (
+              <div className="s-row">
+                <span className="s-status error">{speechNotice}</span>
+              </div>
+            )}
             {speechStatusText(speechStatus) && (
               <div className="s-row">
                 <span className={`s-status${speechStatus?.type === 'error' || speechStatus?.type === 'terminated' ? ' error' : ''}`}>

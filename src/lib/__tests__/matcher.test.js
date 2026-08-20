@@ -178,3 +178,28 @@ describe('createCursorMatcher — sessions and reset', () => {
     expect(tokens[pos.cursorTokenIndex].text).toBe('one')
   })
 })
+
+// ── WS6: language mismatch detection ───────────────────────
+import { languageMismatchMessage } from '../speech'
+
+describe('languageMismatchMessage', () => {
+  const en = 'the quick brown fox jumps over the lazy dog near the bridge'
+  const zh = '今天天气很好我们出去走走慢慢来大家一起加油'
+  const mixed = '我们的React项目 launches today 大家好 stay tuned 谢谢大家'
+
+  it('flags an English script with 中文 tracking', () => {
+    expect(languageMismatchMessage(en, 'zh-CN')).toMatch(/English/)
+  })
+  it('flags a Chinese script with English tracking', () => {
+    expect(languageMismatchMessage(zh, 'en-US')).toMatch(/Chinese/)
+  })
+  it('accepts matched and mixed scripts', () => {
+    expect(languageMismatchMessage(en, 'en-US')).toBe('')
+    expect(languageMismatchMessage(zh, 'zh-CN')).toBe('')
+    expect(languageMismatchMessage(mixed, 'en-US')).toBe('')
+    expect(languageMismatchMessage(mixed, 'zh-CN')).toBe('')
+  })
+  it('stays quiet on tiny scripts', () => {
+    expect(languageMismatchMessage('hi', 'zh-CN')).toBe('')
+  })
+})

@@ -4,18 +4,47 @@
 // matcher. Owns restart/fallback policy; the Rust side only supervises the
 // process (see start_speech in src-tauri/src/lib.rs).
 //
-// createSpeechTracker({ locale, tokens, onUpdate, onStatus, onFallback })
+// createSpeechTracker({ locale, tokens, scriptText, onUpdate, onStatus, onFallback, onDebug })
 //   .start()  — begin listening + recognition
 //   .stop()   — kill the sidecar and unlisten
 //   .reset()  — return the cursor to the top of the script
+//
+// scriptText (optional) is forwarded to the sidecar, which builds a
+// customized language model from it on macOS 14+ (recognition biased toward
+// the exact words being read; silent fallback elsewhere).
 //
 // onUpdate({ cursorTokenIndex, matchedCount, total, done, confidence, speaking })
 // onStatus(status, message) — 'starting' | 'listening' | 'error'
 // onFallback(message) — unrecoverable: caller should switch to the
 //                       frequency-based VAD engine.
+// onDebug(msg) — every raw sidecar message (dev tracking-quality overlay)
 
 import { API } from './api'
 import { createCursorMatcher } from './matcher'
+
+// Script language vs recognition locale sanity check. Returns a warning
+// string for a clear mismatch (tracking would stall silently), '' otherwise.
+// Mixed-language scripts (both ratios in range) are fine — the tokenizer and
+// matcher handle them per-word/per-character.
+export function languageMismatchMessage(scriptText, locale) {
+  const text = scriptText || ''
+  let cjk = 0
+  let total = 0
+  for (const ch of text) {
+    if (/\s/.test(ch)) continue
+    total++
+    if (/[㐀-䶿一-鿿豈-﫿]/.test(ch)) cjk++
+  }
+  if (total < 10) return ''
+  const ratio = cjk / total
+  if (locale === 'zh-CN' && ratio < 0.05) {
+    return 'The script looks English but word tracking is set to 中文 — tracking will not advance. Switch the language in Settings.'
+  }
+  if (locale === 'en-US' && ratio > 0.7) {
+    return 'The script is mostly Chinese but word tracking is set to English — tracking will not advance. Switch the language in Settings (中文).'
+  }
+  return ''
+}
 
 const MAX_RESTARTS = 2
 const SPEAKING_HOLD_MS = 900
@@ -33,7 +62,7 @@ export function fallbackMessageFor(code, detail) {
   return FALLBACK_MESSAGES[code] || detail || 'Speech recognition unavailable — using voice-level detection.'
 }
 
-export function createSpeechTracker({ locale, tokens, onUpdate, onStatus, onFallback }) {
+export function createSpeechTracker({ locale, tokens, scriptText, onUpdate, onStatus, onFallback, onDebug }) {
   const matcher = createCursorMatcher(tokens)
   let unlisten = null
   let stopped = false
@@ -56,6 +85,7 @@ export function createSpeechTracker({ locale, tokens, onUpdate, onStatus, onFall
 
   function handleMsg(msg) {
     if (stopped || !msg || typeof msg !== 'object') return
+    onDebug?.(msg)
     switch (msg.type) {
       case 'ready':
         restarts = 0
@@ -78,7 +108,7 @@ export function createSpeechTracker({ locale, tokens, onUpdate, onStatus, onFall
         if (restarts < MAX_RESTARTS) {
           restarts++
           onStatus?.('starting', 'Speech engine restarting…')
-          API.startSpeech(locale)
+          API.startSpeech(locale, scriptText)
         } else {
           fail(fallbackMessageFor('recognizer_storm'))
         }
@@ -93,7 +123,7 @@ export function createSpeechTracker({ locale, tokens, onUpdate, onStatus, onFall
     onStatus?.('starting', 'Starting speech recognition…')
     unlisten = await API.onSpeechMsg(handleMsg)
     try {
-      await API.startSpeech(locale)
+      await API.startSpeech(locale, scriptText)
     } catch (e) {
       fail(fallbackMessageFor('audio_error', String(e)))
     }
