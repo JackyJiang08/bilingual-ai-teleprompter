@@ -197,6 +197,10 @@ export default function ReadView() {
     // Scroll RAF — two modes:
     //  • word tracking: ease scroll toward the current word's reading line
     //  • legacy: constant speed while the VAD hears speech (or autoScroll)
+    // Demo/test hook (?trackdemo=1): scroll snaps instantly instead of
+    // easing, so snapshot captures are deterministic
+    const demoInstantScroll = new URLSearchParams(window.location.search).has('trackdemo')
+
     function loop(ts) {
       const paused = isPausedRef.current || isHoverPausedRef.current
       const delta = lastFrameRef.current ? Math.min((ts - lastFrameRef.current) / 16.667, 3) : 1
@@ -217,7 +221,7 @@ export default function ReadView() {
             if (el) target = el.offsetTop - vp.clientHeight * READING_LINE
           }
           target = Math.max(0, Math.min(target, maxScroll))
-          const k = 1 - Math.pow(1 - FOLLOW_SMOOTHING, delta)
+          const k = demoInstantScroll ? 1 : 1 - Math.pow(1 - FOLLOW_SMOOTHING, delta)
           const next = scrollPosRef.current + (target - scrollPosRef.current) * k
           if (Math.abs(next - scrollPosRef.current) > 0.01) {
             scrollPosRef.current = next
